@@ -1,10 +1,8 @@
 import type PlexAPI from '@server/api/plexapi';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
-import {
-  PlexPosterMetadata,
-  selectPreferredPosterReference,
-} from './posterSelection';
+import type { PlexPosterMetadata } from './posterSelection';
+import { selectPreferredPosterReference } from './posterSelection';
 
 /**
  * PlexPosterManager - Handles Plex poster management operations
