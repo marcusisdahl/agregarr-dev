@@ -283,6 +283,9 @@ class PosterResetJob {
           fit: 'cover',
           position: 'center',
         })
+        // Preserve Posterizarr/Kometa ownership markers. Sharp removes EXIF
+        // from re-encoded images unless explicitly told to keep it.
+        .keepExif()
         .webp({ quality: 90 })
         .toBuffer();
 

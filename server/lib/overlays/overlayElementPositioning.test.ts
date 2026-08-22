@@ -46,6 +46,27 @@ const renderOne = async (
 };
 
 describe('overlay element positioning', () => {
+  it('preserves EXIF markers when compositing an overlay poster', async () => {
+    const source = await sharp({
+      create: {
+        width: 100,
+        height: 150,
+        channels: 3,
+        background: '#202020',
+      },
+    })
+      .jpeg()
+      .withExif({ IFD0: { ImageDescription: 'posterizarr-marker' } })
+      .toBuffer();
+
+    const output = await overlayTemplateRenderer.compositeOverlays(source, []);
+    const metadata = await sharp(output).metadata();
+
+    expect(metadata.format).toBe('webp');
+    expect(metadata.exif).toBeDefined();
+    expect(metadata.exif?.toString('latin1')).toContain('posterizarr-marker');
+  });
+
   it('anchors a non-rotated element top-left at element.x/y', async () => {
     const overlay = await renderOne(tile());
     expect(overlay.left).toBe(100);
