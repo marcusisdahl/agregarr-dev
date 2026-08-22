@@ -1,0 +1,20 @@
+services:
+  agregarr:
+    build:
+      context: .
+      args:
+        COMMIT_TAG: 06567c37d96419f7f67c1dada2916132186114d5-posterizarr-fix
+    image: agregarr:posterizarr-fix
+    container_name: agregarr-posterizarr-fix
+    ports:
+      - '7172:7171'
+    volumes:
+      - ./test-data/config:/app/config
+      - ./test-data/movies:/data/movies
+      - ./test-data/tv:/data/tv
+    environment:
+      - TZ=Europe/Oslo
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+    restart: unless-stopped
