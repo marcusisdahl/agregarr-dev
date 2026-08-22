@@ -1328,7 +1328,11 @@ class PlexBasePosterManager {
       const item = allItems[i];
 
       try {
-        if (!item.thumb) {
+        const preferredPosterUrl =
+          (await plexApi.getPreferredBasePosterUrl(item.ratingKey)) ||
+          item.thumb;
+
+        if (!preferredPosterUrl) {
           logger.debug('Item has no poster, skipping', {
             label: 'PlexBasePosterManager',
             title: item.title,
@@ -1340,7 +1344,7 @@ class PlexBasePosterManager {
 
         const posterBuffer = await this.downloadFromPlex(
           plexApi,
-          item.thumb,
+          preferredPosterUrl,
           item.ratingKey
         );
         await this.storeBasePoster(posterBuffer, libraryId, item.ratingKey);
