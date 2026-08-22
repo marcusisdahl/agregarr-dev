@@ -3217,6 +3217,16 @@ class PlexAPI {
   }
 
   /**
+   * Resolve the preferred Plex base-poster reference, favoring selected
+   * uploaded posters such as those applied by Posterizarr.
+   */
+  public async getPreferredBasePosterUrl(
+    ratingKey: string
+  ): Promise<string | null> {
+    return this.posterManager.getPreferredBasePosterUrl(ratingKey);
+  }
+
+  /**
    * Build a token-authenticated absolute URL for a Plex image path
    */
   public getAuthenticatedImageUrl(
