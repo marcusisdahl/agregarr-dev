@@ -1,5 +1,6 @@
 import type PlexAPI from '@server/api/plexapi';
 import type { PlexLibraryItem } from '@server/api/plexapi';
+import { resolvePlexPosterDownloadPath } from '@server/lib/collections/plex/posterSelection';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { isWebpBuffer } from '@server/utils/imageFormat';
@@ -328,41 +329,6 @@ class PlexBasePosterManager {
   }
 
   /**
-   * Convert upload:// URL to downloadable path
-   */
-  private async convertUploadUrlToPath(
-    plexApi: PlexAPI,
-    uploadUrl: string,
-    ratingKey: string
-  ): Promise<string> {
-    // If it's already a path, return it
-    if (uploadUrl.startsWith('/')) {
-      return uploadUrl;
-    }
-
-    // If it's upload://posters/{id}, convert to /library/metadata/{ratingKey}/thumb/{id}
-    if (uploadUrl.startsWith('upload://posters/')) {
-      const uploadId = uploadUrl.replace('upload://posters/', '');
-      return `/library/metadata/${ratingKey}/thumb/${uploadId}`;
-    }
-
-    // Unknown format - try to get fresh metadata
-    logger.warn('Unknown poster URL format, fetching fresh metadata', {
-      label: 'PlexBasePosterManager',
-      uploadUrl,
-      ratingKey,
-    });
-
-    const metadata = await plexApi.getMetadata(ratingKey);
-    const thumb = (metadata as { thumb?: string }).thumb;
-    if (thumb && thumb.startsWith('/')) {
-      return thumb;
-    }
-
-    throw new Error(`Cannot convert poster URL: ${uploadUrl}`);
-  }
-
-  /**
    * Download poster from Plex
    */
   private async downloadFromPlex(
@@ -372,13 +338,10 @@ class PlexBasePosterManager {
   ): Promise<Buffer> {
     let downloadPath = thumbUrl;
 
-    // Convert upload:// URLs to downloadable paths
-    if (thumbUrl.startsWith('upload://') && ratingKey) {
-      downloadPath = await this.convertUploadUrlToPath(
-        plexApi,
-        thumbUrl,
-        ratingKey
-      );
+    // Pin content-addressed posters to their exact bytes. This handles both
+    // Posterizarr uploads and metadata-agent posters.
+    if (ratingKey) {
+      downloadPath = resolvePlexPosterDownloadPath(thumbUrl, ratingKey);
     }
 
     let fullUrl: string;
@@ -396,8 +359,9 @@ class PlexBasePosterManager {
         settings.plex.ip
       }:${settings.plex.port}`;
 
-      // Build full URL with token
-      fullUrl = `${baseUrl}${downloadPath}?X-Plex-Token=${plexApi['plexToken']}`;
+      // Build full URL with token, preserving an existing file?url= query.
+      const separator = downloadPath.includes('?') ? '&' : '?';
+      fullUrl = `${baseUrl}${downloadPath}${separator}X-Plex-Token=${plexApi['plexToken']}`;
     }
 
     const response = await axios.get(fullUrl, {
@@ -405,7 +369,12 @@ class PlexBasePosterManager {
       timeout: 30000,
     });
 
-    return Buffer.from(response.data);
+    const posterBuffer = Buffer.from(response.data);
+    if (posterBuffer.length === 0) {
+      throw new Error('Plex returned an empty poster');
+    }
+
+    return posterBuffer;
   }
 
   /**
