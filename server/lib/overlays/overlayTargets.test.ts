@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   getOverlayTargets,
+  isOverlayCompatibleWithLibrary,
   setOverlayTargetTags,
   targetsArtwork,
 } from './overlayTargets';
@@ -26,6 +27,19 @@ describe('overlay artwork targets', () => {
     expect(
       setOverlayTargetTags(['ratings', 'target:main'], ['season', 'episode'])
     ).toEqual(['ratings', 'target:season', 'target:episode']);
+  });
+
+  it('hides child-artwork templates from movie libraries', () => {
+    expect(isOverlayCompatibleWithLibrary(['target:season'], 'movie')).toBe(
+      false
+    );
+    expect(isOverlayCompatibleWithLibrary(['target:episode'], 'movie')).toBe(
+      false
+    );
+    expect(isOverlayCompatibleWithLibrary(['target:main'], 'movie')).toBe(true);
+    expect(isOverlayCompatibleWithLibrary(['target:episode'], 'show')).toBe(
+      true
+    );
   });
 
   it('ships correctly-sized season and episode IMDb presets', () => {

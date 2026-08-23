@@ -31,6 +31,10 @@ import type {
   ApplicationCondition,
   OverlayTemplateType,
 } from '@server/entity/OverlayTemplate';
+import {
+  getOverlayTargets,
+  isOverlayCompatibleWithLibrary,
+} from '@server/lib/overlays/overlayTargets';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { defineMessages, useIntl } from 'react-intl';
 import useSWR, { mutate } from 'swr';
@@ -140,6 +144,10 @@ const ConditionDisplay: React.FC<{ condition: string }> = ({ condition }) => {
 
 const messages = defineMessages({
   configureOverlays: 'Configure Overlays',
+  libraryType: 'Library type',
+  movieLibrary: 'Movies',
+  showLibrary: 'TV shows',
+  detectedFromPlex: 'Detected from Plex',
   save: 'Save Configuration',
   cancel: 'Cancel',
   saveFailed: 'Failed to save configuration',
@@ -231,11 +239,7 @@ const SortableTemplateItem: React.FC<SortableTemplateItemProps> = ({
   };
 
   const conditionText = formatCondition(template.applicationCondition);
-  const artworkTargets =
-    template.tags
-      ?.filter((tag) => /^target:(main|season|episode)$/i.test(tag))
-      .map((tag) => tag.slice(7).toLowerCase()) ?? [];
-  if (artworkTargets.length === 0) artworkTargets.push('main');
+  const artworkTargets = getOverlayTargets(template.tags);
 
   return (
     <div
@@ -521,7 +525,12 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
     };
   }, [previewUrl]);
 
-  const templates = templatesData?.templates || [];
+  // libraryType comes from the live Plex libraries response. Keep it as the
+  // source of truth instead of allowing an older saved config to drift.
+  const detectedLibraryType = libraryType;
+  const templates = (templatesData?.templates || []).filter((template) =>
+    isOverlayCompatibleWithLibrary(template.tags, detectedLibraryType)
+  );
 
   // Sort templates by layer order from enabledOverlays (descending - higher layers at top)
   const sortedTemplates = [...templates].sort((a, b) => {
@@ -606,7 +615,7 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             libraryName,
-            mediaType: configData?.mediaType || libraryType,
+            mediaType: detectedLibraryType,
             enabledOverlays,
             tmdbLanguage: tmdbLanguage || undefined,
             enableEpisodeScanning,
@@ -706,6 +715,23 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
 
             {/* Overlay Selection - Drag & Drop Scrollable List */}
             <div className="min-w-0 flex-1 overflow-y-auto pr-2">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium text-stone-300">
+                    {intl.formatMessage(messages.libraryType)}
+                  </div>
+                  <div className="text-[11px] text-stone-500">
+                    {intl.formatMessage(messages.detectedFromPlex)}
+                  </div>
+                </div>
+                <span className="rounded-full bg-stone-700 px-2.5 py-1 text-xs font-medium text-stone-200">
+                  {intl.formatMessage(
+                    detectedLibraryType === 'show'
+                      ? messages.showLibrary
+                      : messages.movieLibrary
+                  )}
+                </span>
+              </div>
               <div className="mb-3 text-xs text-stone-400">
                 {intl.formatMessage(messages.dragToReorder)}
               </div>
@@ -742,7 +768,7 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
           </div>
 
           {/* Episode Scanning Toggle - Only for show libraries */}
-          {libraryType === 'show' && (
+          {detectedLibraryType === 'show' && (
             <div className="mt-4 border-t border-stone-700 pt-4">
               <div className="flex items-center gap-3">
                 <label className="relative inline-flex cursor-pointer items-center">
@@ -769,7 +795,7 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
           )}
 
           {/* Show Poster Countdown Mode - Only for show libraries */}
-          {libraryType === 'show' && (
+          {detectedLibraryType === 'show' && (
             <div className="mt-4 border-t border-stone-700 pt-4">
               <div className="flex items-center gap-4">
                 <label
@@ -816,7 +842,7 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
           )}
 
           {/* Maintainerr Season Countdown Toggle - Only for show libraries */}
-          {libraryType === 'show' && (
+          {detectedLibraryType === 'show' && (
             <div className="mt-4 border-t border-stone-700 pt-4">
               <div className="flex items-center gap-3">
                 <label

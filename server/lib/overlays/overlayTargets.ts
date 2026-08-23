@@ -15,7 +15,7 @@ export function getOverlayTargets(tags?: string[]): OverlayArtworkTarget[] {
 
   // Templates created before artwork targets existed remain main-poster
   // templates. This keeps every existing library configuration unchanged.
-  return targets.length > 0 ? [...new Set(targets)] : ['main'];
+  return targets.length > 0 ? Array.from(new Set(targets)) : ['main'];
 }
 
 export function targetsArtwork(
@@ -23,6 +23,13 @@ export function targetsArtwork(
   target: OverlayArtworkTarget
 ): boolean {
   return getOverlayTargets(tags).includes(target);
+}
+
+export function isOverlayCompatibleWithLibrary(
+  tags: string[] | undefined,
+  libraryType: 'movie' | 'show'
+): boolean {
+  return libraryType === 'show' || targetsArtwork(tags, 'main');
 }
 
 export function setOverlayTargetTags(
@@ -35,7 +42,7 @@ export function setOverlayTargetTags(
   const normalizedTargets = targets.length > 0 ? targets : ['main'];
   return [
     ...ordinaryTags,
-    ...[...new Set(normalizedTargets)].map(
+    ...Array.from(new Set(normalizedTargets)).map(
       (target) => `${TARGET_TAG_PREFIX}${target}`
     ),
   ];
