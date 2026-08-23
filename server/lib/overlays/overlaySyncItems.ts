@@ -16,6 +16,7 @@ export function buildOverlaySyncItems(
     )
     .map((item) => ({
       ratingKey: item.ratingKey,
+      title: getOverlaySyncItemTitle(item, target),
       target,
       contextFallbackRatingKey:
         target === 'season'
@@ -30,4 +31,30 @@ export function buildOverlaySyncItems(
           ? { seasonNumber: item.parentIndex, episodeNumber: item.index }
           : undefined,
     }));
+}
+
+function getOverlaySyncItemTitle(
+  item: PlexLibraryItem,
+  target: OverlayArtworkTarget
+): string {
+  if (target === 'season') {
+    return item.parentTitle
+      ? `${item.parentTitle} - ${item.title}`
+      : item.title;
+  }
+
+  if (target === 'episode') {
+    const episodeCode =
+      item.parentIndex !== undefined && item.index !== undefined
+        ? `S${String(item.parentIndex).padStart(2, '0')}E${String(
+            item.index
+          ).padStart(2, '0')}`
+        : undefined;
+
+    return [item.grandparentTitle, episodeCode, item.title]
+      .filter(Boolean)
+      .join(' - ');
+  }
+
+  return item.title;
 }

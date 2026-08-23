@@ -1,4 +1,9 @@
 import Button from '@app/components/Common/Button';
+import type {
+  OverlayTargetProgressMap,
+  OverlayTargetProgressValue,
+} from '@app/components/Posters/OverlayTargetProgress';
+import OverlayTargetProgress from '@app/components/Posters/OverlayTargetProgress';
 import { formatTime, formatTimeAgo } from '@app/utils/timeFormatters';
 import {
   CheckIcon,
@@ -10,6 +15,7 @@ import {
   PlayIcon,
   StopIcon,
 } from '@heroicons/react/24/outline';
+import type { OverlayArtworkTarget } from '@server/lib/overlays/overlayTargets';
 import axios from 'axios';
 import type React from 'react';
 import { useMemo, useState } from 'react';
@@ -26,6 +32,8 @@ interface LibraryStatus {
   totalItems: number;
   currentItem: number;
   currentTitle: string;
+  currentTarget?: OverlayArtworkTarget | null;
+  targetProgress?: OverlayTargetProgressMap;
   filteredCount: number;
   successCount: number;
   errorCount: number;
@@ -297,6 +305,30 @@ const OverlaySyncCard: React.FC = () => {
   const totalItems = allLibs.reduce((s, l) => s + l.totalItems, 0);
   const totalProcessed =
     totalSuccess + totalErrors + totalSkipped + totalFiltered;
+  const totalTargetProgress = (
+    ['main', 'season', 'episode'] as OverlayArtworkTarget[]
+  ).reduce<OverlayTargetProgressMap>((totals, target) => {
+    totals[target] = allLibs.reduce<OverlayTargetProgressValue>(
+      (sum, library) => {
+        const value = library.targetProgress?.[target];
+        return {
+          totalItems: sum.totalItems + (value?.totalItems ?? 0),
+          currentItem: sum.currentItem + (value?.currentItem ?? 0),
+          successCount: sum.successCount + (value?.successCount ?? 0),
+          errorCount: sum.errorCount + (value?.errorCount ?? 0),
+          skippedCount: sum.skippedCount + (value?.skippedCount ?? 0),
+        };
+      },
+      {
+        totalItems: 0,
+        currentItem: 0,
+        successCount: 0,
+        errorCount: 0,
+        skippedCount: 0,
+      }
+    );
+    return totals;
+  }, {});
 
   const overallProgress = (() => {
     if (overallState === 'completed') return 100;
@@ -418,6 +450,11 @@ const OverlaySyncCard: React.FC = () => {
           </div>
         </div>
       )}
+
+      <OverlayTargetProgress
+        progress={totalTargetProgress}
+        currentTarget={activeLib?.currentTarget}
+      />
 
       {/* Stats Grid */}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">

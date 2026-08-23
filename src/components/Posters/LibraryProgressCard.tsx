@@ -1,4 +1,6 @@
 import Button from '@app/components/Common/Button';
+import type { OverlayTargetProgressMap } from '@app/components/Posters/OverlayTargetProgress';
+import OverlayTargetProgress from '@app/components/Posters/OverlayTargetProgress';
 import { formatTime } from '@app/utils/timeFormatters';
 import {
   CheckIcon,
@@ -7,6 +9,7 @@ import {
   FunnelIcon,
   StopIcon,
 } from '@heroicons/react/24/outline';
+import type { OverlayArtworkTarget } from '@server/lib/overlays/overlayTargets';
 import type React from 'react';
 import { useMemo } from 'react';
 
@@ -27,6 +30,8 @@ export interface LibraryStatus {
   totalItems: number;
   currentItem: number;
   currentTitle: string;
+  currentTarget?: OverlayArtworkTarget | null;
+  targetProgress?: OverlayTargetProgressMap;
   filteredCount: number;
   successCount: number;
   errorCount: number;
@@ -162,6 +167,11 @@ const LibraryProgressCard: React.FC<LibraryProgressCardProps> = ({
           </p>
         </div>
       )}
+
+      <OverlayTargetProgress
+        progress={status.targetProgress}
+        currentTarget={status.currentTarget}
+      />
 
       {/* Stats Row */}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">

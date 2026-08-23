@@ -153,7 +153,9 @@ const messages = defineMessages({
   detectedFromPlex: 'Detected from Plex',
   syncScope: 'Sync scope',
   syncScopeDescription:
-    'Choose which artwork each overlay job processes for this library.',
+    'Choose which artwork each overlay job processes for this library. A selected target also needs an enabled overlay template for that artwork.',
+  missingFullSyncTemplates:
+    'Full sync will skip {targets} because no enabled template targets that artwork.',
   fullSync: 'Full sync',
   quickSync: 'Quick sync',
   artwork: 'Artwork',
@@ -582,6 +584,26 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
     );
   };
 
+  const getSyncTargetLabel = (target: OverlayArtworkTarget): string =>
+    target === 'main'
+      ? intl.formatMessage(
+          detectedLibraryType === 'movie'
+            ? messages.moviePosters
+            : messages.showPosters
+        )
+      : intl.formatMessage(
+          target === 'season' ? messages.seasonPosters : messages.episodeCards
+        );
+
+  const enabledTemplateTargets = new Set<OverlayArtworkTarget>(
+    sortedTemplates
+      .filter((template) => isEnabled(template.id))
+      .flatMap((template) => getOverlayTargets(template.tags))
+  );
+  const missingFullSyncTemplateTargets = fullSyncTargets.filter(
+    (target) => !enabledTemplateTargets.has(target)
+  );
+
   const handleToggle = (templateId: number) => {
     setEnabledOverlays((prev) => {
       const existing = prev.find((o) => o.templateId === templateId);
@@ -838,18 +860,7 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
                 </span>
               </div>
               {availableSyncTargets.map((target) => {
-                const label =
-                  target === 'main'
-                    ? intl.formatMessage(
-                        detectedLibraryType === 'movie'
-                          ? messages.moviePosters
-                          : messages.showPosters
-                      )
-                    : intl.formatMessage(
-                        target === 'season'
-                          ? messages.seasonPosters
-                          : messages.episodeCards
-                      );
+                const label = getSyncTargetLabel(target);
 
                 return (
                   <div
@@ -877,6 +888,15 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
                 );
               })}
             </div>
+            {missingFullSyncTemplateTargets.length > 0 && (
+              <div className="bg-amber-950/40 mt-3 rounded-md border border-amber-700 px-3 py-2 text-xs text-amber-200">
+                {intl.formatMessage(messages.missingFullSyncTemplates, {
+                  targets: missingFullSyncTemplateTargets
+                    .map(getSyncTargetLabel)
+                    .join(', '),
+                })}
+              </div>
+            )}
           </div>
 
           {/* Episode Scanning Toggle - Only for show libraries */}

@@ -8,6 +8,7 @@ describe('overlay sync item expansion', () => {
       {
         ratingKey: 'season-1',
         parentRatingKey: 'show-1',
+        parentTitle: 'The Show',
         title: 'Season 2',
         type: 'season',
         index: 2,
@@ -17,6 +18,7 @@ describe('overlay sync item expansion', () => {
     expect(buildOverlaySyncItems(items, 'season')).toEqual([
       {
         ratingKey: 'season-1',
+        title: 'The Show - Season 2',
         target: 'season',
         contextFallbackRatingKey: 'show-1',
         contextOverrides: { seasonNumber: 2, episodeNumber: undefined },
@@ -29,6 +31,7 @@ describe('overlay sync item expansion', () => {
       {
         ratingKey: 'episode-1',
         grandparentRatingKey: 'show-1',
+        grandparentTitle: 'The Show',
         title: 'Episode 8',
         type: 'episode',
         parentIndex: 3,
@@ -39,6 +42,7 @@ describe('overlay sync item expansion', () => {
     expect(buildOverlaySyncItems(items, 'episode')).toEqual([
       {
         ratingKey: 'episode-1',
+        title: 'The Show - S03E08 - Episode 8',
         target: 'episode',
         contextFallbackRatingKey: 'show-1',
         contextOverrides: { seasonNumber: 3, episodeNumber: 8 },

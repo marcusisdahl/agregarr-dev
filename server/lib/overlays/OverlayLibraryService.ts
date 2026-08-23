@@ -38,6 +38,12 @@ import {
   fetchReleaseDateInfo,
   type ReleaseDateInfo,
 } from './OverlayContextBuilder';
+import {
+  cloneOverlayTargetProgress,
+  createOverlayTargetProgress,
+  recordOverlayTargetOutcome,
+  type OverlayTargetProgressMap,
+} from './overlayProgress';
 import { buildOverlaySyncItems } from './overlaySyncItems';
 import {
   normalizeOverlaySyncTargets,
@@ -81,6 +87,7 @@ function resolveBasePosterSource(
  */
 export interface OverlayItemInput {
   ratingKey: string;
+  title?: string;
   target?: OverlayArtworkTarget;
   contextFallbackRatingKey?: string;
   contextOverrides?: Partial<OverlayRenderContext>;
@@ -90,6 +97,7 @@ export type OverlayItemOutcome = 'success' | 'skipped' | 'error';
 
 export interface OverlayBatchOptions {
   checkCancelled?: () => boolean;
+  onItemStart?: (item: OverlayItemInput) => void;
   onItemComplete?: (
     outcome: OverlayItemOutcome,
     item: OverlayItemInput
@@ -124,6 +132,8 @@ interface LibraryProgress {
   totalItems: number;
   currentItem: number;
   currentTitle: string;
+  currentTarget: OverlayArtworkTarget | null;
+  targetProgress: OverlayTargetProgressMap;
   filteredCount: number; // Episodes/seasons skipped by type filter
 
   // Outcome counts
@@ -152,6 +162,8 @@ export interface LibraryStatus {
   totalItems: number;
   currentItem: number;
   currentTitle: string;
+  currentTarget: OverlayArtworkTarget | null;
+  targetProgress: OverlayTargetProgressMap;
   filteredCount: number;
   successCount: number;
   errorCount: number;
@@ -344,6 +356,8 @@ class OverlayLibraryService {
       totalItems: progress.totalItems,
       currentItem: progress.currentItem,
       currentTitle: progress.currentTitle,
+      currentTarget: progress.currentTarget,
+      targetProgress: cloneOverlayTargetProgress(progress.targetProgress),
       filteredCount: progress.filteredCount,
       successCount: progress.successCount,
       errorCount: progress.errorCount,
@@ -1098,6 +1112,8 @@ class OverlayLibraryService {
       totalItems: progress.totalItems,
       currentItem: progress.currentItem,
       currentTitle: progress.currentTitle,
+      currentTarget: progress.currentTarget,
+      targetProgress: cloneOverlayTargetProgress(progress.targetProgress),
       filteredCount: progress.filteredCount,
       successCount: progress.successCount,
       errorCount: progress.errorCount,
@@ -1266,6 +1282,8 @@ class OverlayLibraryService {
       totalItems: 0,
       currentItem: 0,
       currentTitle: '',
+      currentTarget: null,
+      targetProgress: createOverlayTargetProgress(),
       filteredCount: 0,
       successCount: 0,
       errorCount: 0,
@@ -1488,6 +1506,18 @@ class OverlayLibraryService {
             targetsArtwork(template.getTags(), 'main')
           )
         : [];
+      const syncSeasons =
+        config.mediaType === 'show' &&
+        fullSyncTargets.includes('season') &&
+        sortedTemplates.some((template) =>
+          targetsArtwork(template.getTags(), 'season')
+        );
+      const syncEpisodes =
+        config.mediaType === 'show' &&
+        fullSyncTargets.includes('episode') &&
+        sortedTemplates.some((template) =>
+          targetsArtwork(template.getTags(), 'episode')
+        );
 
       // Pre-analyze all enabled templates to determine which context fields are needed
       // This allows skipping expensive API calls (e.g., RT ratings) if no template uses them
@@ -1577,22 +1607,53 @@ class OverlayLibraryService {
         offset += pageSize;
       }
 
-      // Set total items count
+      // Discover every selected artwork target before rendering starts. This
+      // makes the full-sync total stable from the beginning instead of adding
+      // seasons and episodes only after all show posters have completed.
+      const mainItems =
+        mainTemplates.length > 0
+          ? allItems.filter(
+              (item) => item.type !== 'episode' && item.type !== 'season'
+            )
+          : [];
+      const [seasons, episodes] = await Promise.all([
+        syncSeasons
+          ? plexApi.getLibraryItemsByType(libraryId, 3)
+          : Promise.resolve([] as PlexLibraryItem[]),
+        syncEpisodes
+          ? plexApi.getLibraryItemsByType(libraryId, 4)
+          : Promise.resolve([] as PlexLibraryItem[]),
+      ]);
+      const seasonItems = buildOverlaySyncItems(seasons, 'season');
+      const episodeItems = buildOverlaySyncItems(episodes, 'episode');
+      const childItems = [...seasonItems, ...episodeItems];
+
+      // Set the overall and target totals together so API consumers never see
+      // a root-only total for a TV full sync.
       this.updateProgress(libraryId, (p) => {
-        p.totalItems = mainTemplates.length > 0 ? allItems.length : 0;
+        p.targetProgress.main.totalItems = mainItems.length;
+        p.targetProgress.season.totalItems = seasonItems.length;
+        p.targetProgress.episode.totalItems = episodeItems.length;
+        p.totalItems = mainItems.length + childItems.length;
       });
 
       logger.info('Processing library items', {
         label: 'OverlayLibrary',
         libraryId,
-        itemCount: allItems.length,
+        mainItems: mainItems.length,
+        seasonItems: seasonItems.length,
+        episodeItems: episodeItems.length,
+        totalItems: mainItems.length + childItems.length,
       });
 
       // Handle empty library - mark completed immediately
-      if (allItems.length === 0) {
-        logger.info('Library has no items to process', {
+      if (mainItems.length === 0 && childItems.length === 0) {
+        logger.info('Library has no selected artwork to process', {
           label: 'OverlayLibrary',
           libraryId,
+          fullSyncTargets,
+          syncSeasons,
+          syncEpisodes,
         });
         // Deliberately no season cleanup here. This is a *data* read, and a Plex
         // hiccup that returns an empty listing is indistinguishable from a truly
@@ -1606,7 +1667,7 @@ class OverlayLibraryService {
       // Only prefetch if templates actually use these fields
       // ========================================================================
       if (needsImdbRatings) {
-        await this.prefetchImdbRatings(allItems);
+        await this.prefetchImdbRatings(mainItems);
       } else {
         logger.info('Skipping IMDb prefetch - no templates use IMDb ratings', {
           label: 'OverlayLibrary',
@@ -1620,7 +1681,7 @@ class OverlayLibraryService {
       );
 
       if (needsReleaseDates) {
-        await this.prefetchTmdbReleaseDates(allItems);
+        await this.prefetchTmdbReleaseDates(mainItems);
       } else {
         logger.info('Skipping TMDB prefetch - no templates use release dates', {
           label: 'OverlayLibrary',
@@ -1630,10 +1691,11 @@ class OverlayLibraryService {
 
       // Batch-fetch full metadata for all applicable items in a single Plex call.
       // This replaces N sequential getMetadata() calls (~200ms each) with 1 bulk request.
-      const overlayRatingKeys = allItems
-        .filter((i) => i.type !== 'episode' && i.type !== 'season')
-        .map((i) => i.ratingKey);
-      const batchMetadata = await plexApi.getMetadataBatch(overlayRatingKeys);
+      const overlayRatingKeys = mainItems.map((i) => i.ratingKey);
+      const batchMetadata =
+        overlayRatingKeys.length > 0
+          ? await plexApi.getMetadataBatch(overlayRatingKeys)
+          : new Map<string, PlexMetadata>();
 
       // Episode media scanning: aggregate episode-level resolution/HDR/DV to show posters
       if (config.enableEpisodeScanning && config.mediaType === 'show') {
@@ -1649,24 +1711,9 @@ class OverlayLibraryService {
       let cancelled = false;
 
       const processItem = async (item: PlexLibraryItem) => {
-        if (item.type === 'episode' || item.type === 'season') {
-          this.updateProgress(libraryId, (p) => {
-            p.currentItem++;
-            p.filteredCount++;
-          });
-          return;
-        }
-
-        if (mainTemplates.length === 0) {
-          this.updateProgress(libraryId, (p) => {
-            p.currentItem++;
-            p.skippedCount++;
-          });
-          return;
-        }
-
         this.updateProgress(libraryId, (p) => {
           p.currentTitle = item.title || '';
+          p.currentTarget = 'main';
         });
 
         try {
@@ -1699,14 +1746,17 @@ class OverlayLibraryService {
             }
             if (result.skipped) {
               p.skippedCount++;
+              recordOverlayTargetOutcome(p.targetProgress, 'main', 'skipped');
             } else {
               p.successCount++;
+              recordOverlayTargetOutcome(p.targetProgress, 'main', 'success');
             }
           });
         } catch (error) {
           this.updateProgress(libraryId, (p) => {
             p.currentItem++;
             p.errorCount++;
+            recordOverlayTargetOutcome(p.targetProgress, 'main', 'error');
             if (p.itemErrors.length < 50) {
               const raw =
                 error instanceof Error ? error.message : String(error);
@@ -1734,7 +1784,7 @@ class OverlayLibraryService {
 
       const active: Promise<void>[] = [];
       try {
-        for (const item of mainTemplates.length > 0 ? allItems : []) {
+        for (const item of mainItems) {
           if (checkCancelled?.()) {
             cancelled = true;
             break;
@@ -1760,7 +1810,7 @@ class OverlayLibraryService {
           label: 'OverlayLibrary',
           libraryId,
           processedItems: progress?.currentItem || 0,
-          totalItems: allItems.length,
+          totalItems: mainItems.length + childItems.length,
         });
         if (progress) {
           progress.state = 'cancelled';
@@ -1770,39 +1820,22 @@ class OverlayLibraryService {
       }
 
       if (config.mediaType === 'show') {
-        const childItems: OverlayItemInput[] = [];
-        const syncSeasons =
-          fullSyncTargets.includes('season') &&
-          sortedTemplates.some((template) =>
-            targetsArtwork(template.getTags(), 'season')
-          );
-        const syncEpisodes =
-          fullSyncTargets.includes('episode') &&
-          sortedTemplates.some((template) =>
-            targetsArtwork(template.getTags(), 'episode')
-          );
-
-        if (syncSeasons) {
-          const seasons = await plexApi.getLibraryItemsByType(libraryId, 3);
-          childItems.push(...buildOverlaySyncItems(seasons, 'season'));
-        }
-
-        if (syncEpisodes && !checkCancelled?.()) {
-          const episodes = await plexApi.getLibraryItemsByType(libraryId, 4);
-          childItems.push(...buildOverlaySyncItems(episodes, 'episode'));
-        }
-
         if (childItems.length > 0 && !checkCancelled?.()) {
-          this.updateProgress(libraryId, (p) => {
-            p.totalItems += childItems.length;
-          });
-
           await this.applyOverlaysToCollectionItems(childItems, libraryId, {
             checkCancelled,
+            onItemStart: (item) => {
+              this.updateProgress(libraryId, (p) => {
+                p.currentTarget = item.target || 'main';
+                p.currentTitle =
+                  item.title || `${item.target || 'main'} ${item.ratingKey}`;
+              });
+            },
             onItemComplete: (outcome, item) => {
               this.updateProgress(libraryId, (p) => {
+                const target = item.target || 'main';
                 p.currentItem++;
-                p.currentTitle = `${item.target || 'main'} ${item.ratingKey}`;
+                p.currentTarget = target;
+                p.currentTitle = item.title || `${target} ${item.ratingKey}`;
                 p._recentItemTimes.push(Date.now());
                 if (p._recentItemTimes.length > 20) {
                   p._recentItemTimes.shift();
@@ -1810,6 +1843,7 @@ class OverlayLibraryService {
                 if (outcome === 'success') p.successCount++;
                 else if (outcome === 'error') p.errorCount++;
                 else p.skippedCount++;
+                recordOverlayTargetOutcome(p.targetProgress, target, outcome);
               });
             },
           });
@@ -2215,6 +2249,7 @@ class OverlayLibraryService {
 
         for (const overlayItem of normalizedItems) {
           if (options.checkCancelled?.()) break;
+          options.onItemStart?.(overlayItem);
 
           const {
             ratingKey,
@@ -3177,6 +3212,7 @@ class OverlayLibraryService {
 
     this.updateProgress(libraryId, (p) => {
       p.totalItems += activeSeasons.length;
+      p.targetProgress.season.totalItems += activeSeasons.length;
     });
 
     for (const meta of activeSeasons) {
@@ -3209,6 +3245,7 @@ class OverlayLibraryService {
 
       this.updateProgress(libraryId, (p) => {
         p.currentTitle = displayTitle;
+        p.currentTarget = 'season';
       });
 
       try {
@@ -3270,14 +3307,17 @@ class OverlayLibraryService {
 
           if (result.skipped) {
             p.skippedCount++;
+            recordOverlayTargetOutcome(p.targetProgress, 'season', 'skipped');
           } else {
             p.successCount++;
+            recordOverlayTargetOutcome(p.targetProgress, 'season', 'success');
           }
         });
       } catch (error) {
         this.updateProgress(libraryId, (p) => {
           p.currentItem++;
           p.errorCount++;
+          recordOverlayTargetOutcome(p.targetProgress, 'season', 'error');
 
           p._recentItemTimes.push(Date.now());
           if (p._recentItemTimes.length > 20) {

@@ -84,6 +84,67 @@ servers:
 
 components:
   schemas:
+    OverlayTargetProgress:
+      type: object
+      properties:
+        totalItems:
+          type: integer
+        currentItem:
+          type: integer
+        successCount:
+          type: integer
+        errorCount:
+          type: integer
+        skippedCount:
+          type: integer
+    OverlayLibraryProgress:
+      type: object
+      properties:
+        libraryId:
+          type: string
+        libraryName:
+          type: string
+        running:
+          type: boolean
+        state:
+          type: string
+          enum: [running, cancelling, completed, cancelled, failed]
+        startTime:
+          type: number
+        runningFor:
+          type: number
+        totalItems:
+          type: integer
+        currentItem:
+          type: integer
+        currentTitle:
+          type: string
+        currentTarget:
+          type: string
+          nullable: true
+          enum: [main, season, episode]
+        targetProgress:
+          type: object
+          properties:
+            main:
+              $ref: '#/components/schemas/OverlayTargetProgress'
+            season:
+              $ref: '#/components/schemas/OverlayTargetProgress'
+            episode:
+              $ref: '#/components/schemas/OverlayTargetProgress'
+        filteredCount:
+          type: integer
+        successCount:
+          type: integer
+        errorCount:
+          type: integer
+        skippedCount:
+          type: integer
+        progressPercent:
+          type: integer
+        estimatedSecondsRemaining:
+          type: number
+          nullable: true
     User:
       type: object
       properties:
@@ -15848,17 +15909,11 @@ paths:
                   runningLibraries:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        libraryId:
-                          type: string
-                          example: '1'
-                        libraryName:
-                          type: string
-                          example: 'Movies'
-                        startTime:
-                          type: number
-                          example: 1640000000000
+                      $ref: '#/components/schemas/OverlayLibraryProgress'
+                  lastCompleted:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OverlayLibraryProgress'
 
   /overlay-settings:
     get:
