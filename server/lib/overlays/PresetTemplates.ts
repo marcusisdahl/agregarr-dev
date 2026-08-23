@@ -155,9 +155,16 @@ export const PRESET_TEMPLATES: {
   {
     name: 'IMDb Rating - Episode Card',
     description:
-      'Shows the episode IMDb rating, falling back to the parent show rating, on Posterizarr-triggered title cards',
+      'Shows an episode-specific IMDb rating; episodes without one keep a clean title card',
     type: 'rating',
     tags: ['Ratings', 'Posterizarr', 'target:episode'],
+    applicationCondition: {
+      sections: [
+        {
+          rules: [{ field: 'imdbRating', operator: 'gte', value: 0 }],
+        },
+      ],
+    },
     templateData: {
       width: 1920,
       height: 1080,

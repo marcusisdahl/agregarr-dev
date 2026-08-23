@@ -87,5 +87,12 @@ describe('overlay artwork targets', () => {
     expect(season?.templateData).toMatchObject({ width: 1000, height: 1500 });
     expect(episode?.tags).toContain('target:episode');
     expect(episode?.templateData).toMatchObject({ width: 1920, height: 1080 });
+    expect(episode?.applicationCondition).toEqual({
+      sections: [
+        {
+          rules: [{ field: 'imdbRating', operator: 'gte', value: 0 }],
+        },
+      ],
+    });
   });
 });

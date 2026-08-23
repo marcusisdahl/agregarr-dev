@@ -26,6 +26,10 @@ import type {
   AggregatedMediaInfo,
   EpisodeMediaInfo,
 } from './episodeMediaTypes';
+import {
+  getEpisodeRatingEligibility,
+  getUnratedEpisodeAction,
+} from './episodeRatingPolicy';
 import { collectImdbPrefetchCandidates } from './imdbPrefetchCandidates';
 import {
   collectSeasonCandidateKeys,
@@ -2185,6 +2189,7 @@ class OverlayLibraryService {
 
       try {
         const needsImdbRatings =
+          batchTargets.has('episode') ||
           requiredContextFields.has('imdbRating') ||
           requiredContextFields.has('isImdbTop250') ||
           requiredContextFields.has('imdbTop250Rank');
@@ -2290,10 +2295,6 @@ class OverlayLibraryService {
                 continue;
               }
 
-              const isChild =
-                itemMetadata.type === 'episode' ||
-                itemMetadata.type === 'season';
-
               // Convert to PlexLibraryItem format (cast to satisfy type requirements)
               const item = {
                 ratingKey: itemMetadata.ratingKey,
@@ -2325,19 +2326,49 @@ class OverlayLibraryService {
               const inheritedContext = contextFallbackRatingKey
                 ? fallbackContexts.get(contextFallbackRatingKey)
                 : undefined;
-              const childImdbId = isChild
-                ? item.Guid?.find((guid) =>
-                    guid.id?.startsWith('imdb://')
-                  )?.id?.replace('imdb://', '')
-                : undefined;
-              const childImdbRating = childImdbId
-                ? this.preloadedImdbRatings?.get(childImdbId)
-                : undefined;
+              const episodeRating =
+                target === 'episode'
+                  ? getEpisodeRatingEligibility(
+                      item.Guid,
+                      this.preloadedImdbRatings
+                    )
+                  : undefined;
+              const templatesToApply =
+                target === 'episode' && !episodeRating?.eligible
+                  ? []
+                  : itemTemplates;
+              const restoreMissingEpisodeRating =
+                target === 'episode' && !episodeRating?.eligible;
+              const contextFallbacks =
+                target === 'episode'
+                  ? {
+                      ...inheritedContext,
+                      // Never let the parent show's score qualify an episode.
+                      // A numeric episode score is the only value allowed back.
+                      imdbRating: episodeRating?.rating,
+                    }
+                  : inheritedContext;
+
+              if (target === 'episode' && !episodeRating?.eligible) {
+                // Prevent buildRenderContext from attempting an individual
+                // lookup and tripping its critical-failure guard. Batch miss,
+                // null, and missing GUID all intentionally restore the clean
+                // card according to the episode eligibility policy.
+                item.Guid = undefined;
+                logger.debug(
+                  'Episode has no usable IMDb rating; applying clean base card',
+                  {
+                    label: 'OverlayLibrary',
+                    ratingKey,
+                    imdbId: episodeRating?.imdbId,
+                  }
+                );
+              }
 
               const result = await this.applyOverlaysToItem(
                 plexApi,
                 item,
-                itemTemplates,
+                templatesToApply,
                 mediaType,
                 libraryId,
                 config.libraryName,
@@ -2350,9 +2381,8 @@ class OverlayLibraryService {
                 contextOverrides,
                 aggregatedMedia,
                 undefined,
-                childImdbRating !== undefined && childImdbRating !== null
-                  ? { ...inheritedContext, imdbRating: childImdbRating }
-                  : inheritedContext
+                contextFallbacks,
+                restoreMissingEpisodeRating
               );
               if (result.skipped) {
                 reportOutcome('skipped', overlayItem);
@@ -2416,6 +2446,10 @@ class OverlayLibraryService {
    *   must set this: without it a condition-miss still re-encodes, re-uploads and
    *   locks the poster with no visible overlay. Existing callers omit it and keep
    *   today's behaviour, where a zero-match item resets to its base poster.
+   * @param restoreTrackedBaseForEmptyTemplates - When true with an empty template
+   *   list, skip never-overlaid items but restore the saved base artwork for items
+   *   this service previously overlaid. Used by the episode-rating eligibility
+   *   policy so unrated episodes stay clean without re-uploading every fresh card.
    */
   private async applyOverlaysToItem(
     plexApi: PlexAPI,
@@ -2429,7 +2463,8 @@ class OverlayLibraryService {
     contextOverrides?: Partial<OverlayRenderContext>,
     aggregatedMediaOverride?: Map<string, AggregatedMediaInfo>,
     requireOverlayMatch?: boolean,
-    contextFallbacks?: Partial<OverlayRenderContext>
+    contextFallbacks?: Partial<OverlayRenderContext>,
+    restoreTrackedBaseForEmptyTemplates = false
   ): Promise<OverlayApplyResult> {
     try {
       // CRITICAL: Derive actual media type from item.type, not library config
@@ -2454,6 +2489,22 @@ class OverlayLibraryService {
         await import('@server/lib/metadata/MetadataTrackingService')
       ).default;
       const metadata = await metadataService.getItemMetadata(item.ratingKey);
+
+      if (
+        restoreTrackedBaseForEmptyTemplates &&
+        templates.length === 0 &&
+        getUnratedEpisodeAction(Boolean(metadata)) === 'keep-clean'
+      ) {
+        logger.debug(
+          'Episode has no usable IMDb rating and no tracked overlay; keeping clean base card',
+          {
+            label: 'OverlayLibrary',
+            itemTitle: item.title,
+            ratingKey: item.ratingKey,
+          }
+        );
+        return { skipped: true };
+      }
 
       // Extract TMDB ID from item GUIDs
       let tmdbId: number | undefined;
