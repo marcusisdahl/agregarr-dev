@@ -15615,6 +15615,49 @@ paths:
         '500':
           description: Failed to start overlay application
 
+  /posterizarr/trigger:
+    post:
+      summary: Queue collection and overlay processing for a Posterizarr item
+      description: Resolves the Plex library from the rating key, incrementally adds the item to known collections, then applies the library's configured overlays. Duplicate callbacks are coalesced.
+      tags:
+        - overlays
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ratingKey:
+                  type: string
+                  example: '12345'
+                title:
+                  type: string
+                  example: 'The Lego Movie'
+                mediaType:
+                  type: string
+                  enum: [movie, show]
+              required:
+                - ratingKey
+      responses:
+        '202':
+          description: Trigger accepted or coalesced with existing work
+        '400':
+          description: Invalid trigger payload
+        '403':
+          description: Authentication required
+
+  /posterizarr/status:
+    get:
+      summary: Get Posterizarr item-trigger queue status
+      tags:
+        - overlays
+      responses:
+        '200':
+          description: Current queue and last completed result
+        '403':
+          description: Authentication required
+
   /overlay-library-configs/{libraryId}/apply-items:
     post:
       summary: Apply overlays to a specific library item
