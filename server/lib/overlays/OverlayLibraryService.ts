@@ -2568,7 +2568,7 @@ class OverlayLibraryService {
         }
       }
 
-      // Single composite + WebP encode for all templates
+      // Single composite + JPEG encode for all templates
       const currentBuffer = await overlayTemplateRenderer.compositeOverlays(
         posterBuffer,
         allOverlays

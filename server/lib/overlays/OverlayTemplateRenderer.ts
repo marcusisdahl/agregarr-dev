@@ -15,6 +15,7 @@ import logger from '@server/logger';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
+import { AGREGARR_OVERLAY_MARKER } from './posterOwnershipMetadata';
 import { getMergedMappings } from './UserMappingsService';
 
 /**
@@ -733,13 +734,16 @@ class OverlayTemplateRendererService {
       composite = composite.composite(overlays);
     }
 
-    // Posterizarr and Kometa embed ownership/overlay markers in EXIF. Sharp
-    // strips metadata by default when it re-encodes the poster, which makes a
-    // later Posterizarr run treat our derived poster as unowned and replace it.
-    // Posterizarr only scans the first 64 KiB of Plex artwork. WebP places its
-    // EXIF chunk after the compressed image data, outside that scan for normal
-    // poster sizes, whereas JPEG stores EXIF near the start of the file.
-    return await composite.keepExif().jpeg({ quality: 92 }).toBuffer();
+    // Posterizarr writes its marker as a JPEG comment, not EXIF, and Sharp does
+    // not carry JPEG comments through re-encoding. Add our own explicit overlay
+    // marker as EXIF near the beginning of the JPEG, inside Posterizarr's 64-KiB
+    // metadata scan. withExifMerge also retains any real source EXIF tags.
+    return await composite
+      .withExifMerge({
+        IFD0: { ImageDescription: AGREGARR_OVERLAY_MARKER },
+      })
+      .jpeg({ quality: 92 })
+      .toBuffer();
   }
 
   /**

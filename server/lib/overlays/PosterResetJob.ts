@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import sharp from 'sharp';
+import { getRecognizedPosterOwnershipMarker } from './posterOwnershipMetadata';
 
 interface ResetStatus {
   running: boolean;
@@ -277,15 +278,30 @@ class PosterResetJob {
           tmdbId
         );
 
-      // Ensure poster is in WebP format and properly sized
-      const posterBuffer = await sharp(basePosterResult.posterBuffer)
-        .resize(1000, 1500, {
+      // Ensure poster is in JPEG format and properly sized
+      const sourceOwnershipMarker = getRecognizedPosterOwnershipMarker(
+        basePosterResult.posterBuffer
+      );
+      let posterPipeline = sharp(basePosterResult.posterBuffer).resize(
+        1000,
+        1500,
+        {
           fit: 'cover',
           position: 'center',
-        })
-        // Preserve Posterizarr/Kometa ownership markers in a JPEG, where their
-        // first-64-KiB metadata scan can detect them.
-        .keepExif()
+        }
+      );
+
+      // Sharp drops Posterizarr's JPEG comment. Translate a recognized source
+      // marker into early JPEG EXIF, but do not mark an unowned base poster.
+      posterPipeline = sourceOwnershipMarker
+        ? posterPipeline.withExifMerge({
+            IFD0: {
+              ImageDescription: `${sourceOwnershipMarker}; preserved by Agregarr`,
+            },
+          })
+        : posterPipeline.keepExif();
+
+      const posterBuffer = await posterPipeline
         .jpeg({ quality: 90 })
         .toBuffer();
 

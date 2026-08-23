@@ -10,6 +10,10 @@ import { describe, expect, it } from 'vitest';
 import type { OverlayElement } from '@server/entity/OverlayTemplate';
 
 import { overlayTemplateRenderer } from './OverlayTemplateRenderer';
+import {
+  AGREGARR_OVERLAY_MARKER,
+  getRecognizedPosterOwnershipMarker,
+} from './posterOwnershipMetadata';
 import { createSampleOverlayContext } from './sampleOverlayContext';
 
 const tile = (
@@ -45,28 +49,39 @@ const renderOne = async (
   return overlay;
 };
 
+const addJpegComment = (jpeg: Buffer, comment: string): Buffer => {
+  const commentBytes = Buffer.from(comment, 'utf8');
+  const commentSegment = Buffer.alloc(commentBytes.length + 4);
+  commentSegment[0] = 0xff;
+  commentSegment[1] = 0xfe;
+  commentSegment.writeUInt16BE(commentBytes.length + 2, 2);
+  commentBytes.copy(commentSegment, 4);
+
+  // JPEG starts with the two-byte SOI marker. A COM segment can follow it.
+  return Buffer.concat([jpeg.subarray(0, 2), commentSegment, jpeg.subarray(2)]);
+};
+
 describe('overlay element positioning', () => {
-  it('keeps Posterizarr EXIF markers inside its first-64-KiB scan', async () => {
+  it("keeps an ownership marker inside Posterizarr's first-64-KiB scan", async () => {
     const width = 1000;
     const height = 1500;
-    const marker = 'created with posterizarr';
+    const posterizarrMarker = 'created with posterizarr';
     const pixels = Buffer.alloc(width * height * 3);
     let randomState = 0x12345678;
 
     // Deterministic noise keeps the encoded poster larger than 64 KiB. A tiny
     // fixture would not catch WebP moving EXIF behind the compressed pixels.
     for (let index = 0; index < pixels.length; index += 1) {
-      randomState =
-        (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
+      randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
       pixels[index] = randomState >>> 24;
     }
 
-    const source = await sharp(pixels, {
+    const sourceWithoutComment = await sharp(pixels, {
       raw: { width, height, channels: 3 },
     })
       .jpeg({ quality: 92 })
-      .withExif({ IFD0: { ImageDescription: marker } })
       .toBuffer();
+    const source = addJpegComment(sourceWithoutComment, posterizarrMarker);
 
     const output = await overlayTemplateRenderer.compositeOverlays(source, []);
     const metadata = await sharp(output).metadata();
@@ -76,10 +91,15 @@ describe('overlay element positioning', () => {
       .toLowerCase();
 
     expect(output.length).toBeGreaterThan(65_537);
+    expect(getRecognizedPosterOwnershipMarker(source)).toBe(posterizarrMarker);
     expect(metadata.format).toBe('jpeg');
     expect(metadata.exif).toBeDefined();
-    expect(metadata.exif?.toString('latin1')).toContain(marker);
-    expect(posterizarrFastScan).toContain(marker);
+    expect(metadata.exif?.toString('latin1')).toContain(
+      AGREGARR_OVERLAY_MARKER
+    );
+    expect(posterizarrFastScan).toContain(
+      AGREGARR_OVERLAY_MARKER.toLowerCase()
+    );
   });
 
   it('anchors a non-rotated element top-left at element.x/y', async () => {

@@ -7,6 +7,7 @@ import { isWebpBuffer } from '@server/utils/imageFormat';
 import axios from 'axios';
 import fs from 'fs/promises';
 import path from 'path';
+import { hasAgregarrOverlayMarker } from './posterOwnershipMetadata';
 
 const BASE_POSTERS_DIR = path.join(
   process.cwd(),
@@ -1078,17 +1079,18 @@ class PlexBasePosterManager {
       );
 
       // Adopting the current poster as the new base is only safe when it really
-      // is a poster Plex owns. Every poster Agregarr uploads is WebP, so a WebP
-      // poster on an item we have already overlaid is very likely our own
-      // overlay whose tracking went stale - the overlay upload can succeed while
-      // the write recording ourOverlayPosterUrl does not (OverlayLibraryService
+      // is a poster Plex owns. Current Agregarr JPEGs carry an explicit marker;
+      // older releases used WebP. Either format on an item we have already
+      // overlaid can be our own poster whose tracking went stale - the upload
+      // can succeed while the write recording ourOverlayPosterUrl does not
+      // (OverlayLibraryService
       // swallows that failure, and seasonPosterRestore.ts documents the same
       // window). Storing it would bake the overlay in as the base and every
       // later run would composite on top of it. Prefer the tracked base.
       //
-      // The inference only holds one way: a user CAN upload a WebP poster, and
-      // then we keep the old base until they reset it. That is recoverable;
-      // baking in an overlay is not.
+      // The legacy WebP inference only holds one way: a user CAN upload a WebP
+      // poster, and then we keep the old base until they reset it. That is
+      // recoverable; baking in an overlay is not.
       const isTrackedOriginal = posterUrlsMatch(
         currentPlexPosterUrl,
         metadata.originalPlexPosterUrl
@@ -1097,10 +1099,10 @@ class PlexBasePosterManager {
       if (
         !isTrackedOriginal &&
         metadata.ourOverlayPosterUrl &&
-        isWebpBuffer(posterBuffer)
+        (hasAgregarrOverlayMarker(posterBuffer) || isWebpBuffer(posterBuffer))
       ) {
         logger.warn(
-          'Unrecognised WebP poster on an overlaid item - refusing to adopt it as the base',
+          'Unrecognised generated poster on an overlaid item - refusing to adopt it as the base',
           {
             label: 'PlexBasePosterManager',
             libraryId,
