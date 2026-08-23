@@ -2578,7 +2578,7 @@ class OverlayLibraryService {
       const tempDir = os.tmpdir();
       const tempFilePath = path.join(
         tempDir,
-        `overlay-${item.ratingKey}-${Date.now()}.webp`
+        `overlay-${item.ratingKey}-${Date.now()}.jpg`
       );
 
       await fs.writeFile(tempFilePath, currentBuffer);

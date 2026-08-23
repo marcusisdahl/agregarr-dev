@@ -73,17 +73,17 @@ export async function restoreSeasonBasePoster(
   // Normalise to the format/size Plex expects for an uploaded poster.
   const posterBuffer = await sharp(basePoster)
     .resize(1000, 1500, { fit: 'cover', position: 'center' })
-    // Preserve Posterizarr/Kometa ownership markers. Sharp removes EXIF
-    // from re-encoded images unless explicitly told to keep it.
+    // Preserve Posterizarr/Kometa ownership markers in a JPEG, where their
+    // first-64-KiB metadata scan can detect them.
     .keepExif()
-    .webp({ quality: 90 })
+    .jpeg({ quality: 90 })
     .toBuffer();
 
   // randomUUID (not Date.now()) so two restores of the same season can never
   // collide on the temp path and unlink each other's in-flight upload.
   const tempFilePath = path.join(
     os.tmpdir(),
-    `season-restore-${ratingKey}-${randomUUID()}.webp`
+    `season-restore-${ratingKey}-${randomUUID()}.jpg`
   );
 
   await fs.writeFile(tempFilePath, posterBuffer);

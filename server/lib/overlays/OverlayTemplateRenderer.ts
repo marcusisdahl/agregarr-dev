@@ -733,14 +733,13 @@ class OverlayTemplateRendererService {
       composite = composite.composite(overlays);
     }
 
-    // Convert to WebP with high quality for optimal file size
-    // WebP provides 25-35% better compression than JPEG at same quality
-    // (Plex has file size limits around 10-11MB)
     // Posterizarr and Kometa embed ownership/overlay markers in EXIF. Sharp
     // strips metadata by default when it re-encodes the poster, which makes a
     // later Posterizarr run treat our derived poster as unowned and replace it.
-    // Keep the source EXIF while still rendering the pixel data as WebP.
-    return await composite.keepExif().webp({ quality: 92 }).toBuffer();
+    // Posterizarr only scans the first 64 KiB of Plex artwork. WebP places its
+    // EXIF chunk after the compressed image data, outside that scan for normal
+    // poster sizes, whereas JPEG stores EXIF near the start of the file.
+    return await composite.keepExif().jpeg({ quality: 92 }).toBuffer();
   }
 
   /**

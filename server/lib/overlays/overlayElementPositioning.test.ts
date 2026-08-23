@@ -46,25 +46,40 @@ const renderOne = async (
 };
 
 describe('overlay element positioning', () => {
-  it('preserves EXIF markers when compositing an overlay poster', async () => {
-    const source = await sharp({
-      create: {
-        width: 100,
-        height: 150,
-        channels: 3,
-        background: '#202020',
-      },
+  it('keeps Posterizarr EXIF markers inside its first-64-KiB scan', async () => {
+    const width = 1000;
+    const height = 1500;
+    const marker = 'created with posterizarr';
+    const pixels = Buffer.alloc(width * height * 3);
+    let randomState = 0x12345678;
+
+    // Deterministic noise keeps the encoded poster larger than 64 KiB. A tiny
+    // fixture would not catch WebP moving EXIF behind the compressed pixels.
+    for (let index = 0; index < pixels.length; index += 1) {
+      randomState =
+        (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
+      pixels[index] = randomState >>> 24;
+    }
+
+    const source = await sharp(pixels, {
+      raw: { width, height, channels: 3 },
     })
-      .jpeg()
-      .withExif({ IFD0: { ImageDescription: 'posterizarr-marker' } })
+      .jpeg({ quality: 92 })
+      .withExif({ IFD0: { ImageDescription: marker } })
       .toBuffer();
 
     const output = await overlayTemplateRenderer.compositeOverlays(source, []);
     const metadata = await sharp(output).metadata();
+    const posterizarrFastScan = output
+      .subarray(0, 65_537)
+      .toString('utf8')
+      .toLowerCase();
 
-    expect(metadata.format).toBe('webp');
+    expect(output.length).toBeGreaterThan(65_537);
+    expect(metadata.format).toBe('jpeg');
     expect(metadata.exif).toBeDefined();
-    expect(metadata.exif?.toString('latin1')).toContain('posterizarr-marker');
+    expect(metadata.exif?.toString('latin1')).toContain(marker);
+    expect(posterizarrFastScan).toContain(marker);
   });
 
   it('anchors a non-rotated element top-left at element.x/y', async () => {

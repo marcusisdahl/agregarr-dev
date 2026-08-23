@@ -283,17 +283,17 @@ class PosterResetJob {
           fit: 'cover',
           position: 'center',
         })
-        // Preserve Posterizarr/Kometa ownership markers. Sharp removes EXIF
-        // from re-encoded images unless explicitly told to keep it.
+        // Preserve Posterizarr/Kometa ownership markers in a JPEG, where their
+        // first-64-KiB metadata scan can detect them.
         .keepExif()
-        .webp({ quality: 90 })
+        .jpeg({ quality: 90 })
         .toBuffer();
 
       // Save to temporary file
       const tempDir = os.tmpdir();
       const tempFilePath = path.join(
         tempDir,
-        `reset-${item.ratingKey}-${Date.now()}.webp`
+        `reset-${item.ratingKey}-${Date.now()}.jpg`
       );
 
       await fs.writeFile(tempFilePath, posterBuffer);
