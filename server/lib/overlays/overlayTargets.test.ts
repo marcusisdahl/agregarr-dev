@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   getOverlayTargets,
+  getPrimaryOverlayTarget,
   isOverlayCompatibleWithLibrary,
   normalizeOverlaySyncTargets,
   setOverlayTargetTags,
@@ -22,6 +23,15 @@ describe('overlay artwork targets', () => {
       'episode',
     ]);
     expect(targetsArtwork(['target:episode'], 'main')).toBe(false);
+  });
+
+  it('uses a title-card preview for episode-only templates', () => {
+    expect(getPrimaryOverlayTarget(['target:episode'])).toBe('episode');
+    expect(getPrimaryOverlayTarget(['target:season'])).toBe('season');
+    expect(getPrimaryOverlayTarget(['target:main', 'target:episode'])).toBe(
+      'main'
+    );
+    expect(getPrimaryOverlayTarget()).toBe('main');
   });
 
   it('replaces target tags while preserving ordinary tags', () => {

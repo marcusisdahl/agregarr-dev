@@ -9,7 +9,7 @@ import { getDefaultMappings } from './DefaultMappingsService';
 
 /**
  * Preset overlay templates that ship with Agregarr
- * Canvas size: 1000x1500 pixels (standard poster ratio)
+ * Canvas size: 1000x1500 for posters; 1920x1080 for episode cards.
  * */
 export const PRESET_TEMPLATES: {
   name: string;

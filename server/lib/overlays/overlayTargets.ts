@@ -6,6 +6,15 @@ export const ALL_OVERLAY_ARTWORK_TARGETS: OverlayArtworkTarget[] = [
   'episode',
 ];
 
+export const OVERLAY_ARTWORK_DIMENSIONS: Record<
+  OverlayArtworkTarget,
+  { width: number; height: number }
+> = {
+  main: { width: 1000, height: 1500 },
+  season: { width: 1000, height: 1500 },
+  episode: { width: 1920, height: 1080 },
+};
+
 const TARGET_TAG_PREFIX = 'target:';
 const TARGET_TAGS = new Set([
   `${TARGET_TAG_PREFIX}main`,
@@ -29,6 +38,18 @@ export function targetsArtwork(
   target: OverlayArtworkTarget
 ): boolean {
   return getOverlayTargets(tags).includes(target);
+}
+
+/**
+ * Pick one target for places that can only show a single preview. Main and
+ * season artwork take precedence because they share the poster aspect ratio;
+ * an episode-only template gets the title-card preview.
+ */
+export function getPrimaryOverlayTarget(tags?: string[]): OverlayArtworkTarget {
+  const targets = getOverlayTargets(tags);
+  if (targets.includes('main')) return 'main';
+  if (targets.includes('season')) return 'season';
+  return 'episode';
 }
 
 export function isOverlayCompatibleWithLibrary(
