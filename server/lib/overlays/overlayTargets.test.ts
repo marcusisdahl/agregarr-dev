@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   getOverlayTargets,
   isOverlayCompatibleWithLibrary,
+  normalizeOverlaySyncTargets,
   setOverlayTargetTags,
   targetsArtwork,
 } from './overlayTargets';
@@ -40,6 +41,28 @@ describe('overlay artwork targets', () => {
     expect(isOverlayCompatibleWithLibrary(['target:episode'], 'show')).toBe(
       true
     );
+  });
+
+  it('defaults TV syncs to all artwork while preserving explicit job opt-outs', () => {
+    expect(normalizeOverlaySyncTargets(undefined, 'show')).toEqual([
+      'main',
+      'season',
+      'episode',
+    ]);
+    expect(normalizeOverlaySyncTargets(undefined, 'movie')).toEqual(['main']);
+    expect(normalizeOverlaySyncTargets([], 'show')).toEqual([]);
+  });
+
+  it('deduplicates targets and strips TV-only targets from movie libraries', () => {
+    expect(
+      normalizeOverlaySyncTargets(
+        ['episode', 'main', 'season', 'main', 'invalid'],
+        'movie'
+      )
+    ).toEqual(['main']);
+    expect(
+      normalizeOverlaySyncTargets(['episode', 'main', 'episode'], 'show')
+    ).toEqual(['episode', 'main']);
   });
 
   it('ships correctly-sized season and episode IMDb presets', () => {

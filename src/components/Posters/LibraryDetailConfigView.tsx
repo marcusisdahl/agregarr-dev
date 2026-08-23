@@ -32,8 +32,11 @@ import type {
   OverlayTemplateType,
 } from '@server/entity/OverlayTemplate';
 import {
+  getDefaultOverlaySyncTargets,
   getOverlayTargets,
   isOverlayCompatibleWithLibrary,
+  normalizeOverlaySyncTargets,
+  type OverlayArtworkTarget,
 } from '@server/lib/overlays/overlayTargets';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { defineMessages, useIntl } from 'react-intl';
@@ -148,6 +151,16 @@ const messages = defineMessages({
   movieLibrary: 'Movies',
   showLibrary: 'TV shows',
   detectedFromPlex: 'Detected from Plex',
+  syncScope: 'Sync scope',
+  syncScopeDescription:
+    'Choose which artwork each overlay job processes for this library.',
+  fullSync: 'Full sync',
+  quickSync: 'Quick sync',
+  artwork: 'Artwork',
+  moviePosters: 'Movie posters',
+  showPosters: 'Show posters',
+  seasonPosters: 'Season posters',
+  episodeCards: 'Episode cards',
   save: 'Save Configuration',
   cancel: 'Cancel',
   saveFailed: 'Failed to save configuration',
@@ -189,6 +202,8 @@ interface LibraryConfig {
   libraryName: string;
   mediaType: 'movie' | 'show';
   enabledOverlays: EnabledOverlay[];
+  fullSyncTargets?: OverlayArtworkTarget[];
+  quickSyncTargets?: OverlayArtworkTarget[];
   tmdbLanguage?: string;
   enableEpisodeScanning?: boolean;
   enableMaintainerrSeasonOverlays?: boolean;
@@ -343,8 +358,19 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
   libraryType,
 }) => {
   const intl = useIntl();
+  // libraryType comes from the live Plex libraries response. Keep it as the
+  // source of truth instead of allowing an older saved config to drift.
+  const detectedLibraryType = libraryType;
+  const availableSyncTargets =
+    getDefaultOverlaySyncTargets(detectedLibraryType);
   const [saving, setSaving] = useState(false);
   const [enabledOverlays, setEnabledOverlays] = useState<EnabledOverlay[]>([]);
+  const [fullSyncTargets, setFullSyncTargets] = useState<
+    OverlayArtworkTarget[]
+  >(() => getDefaultOverlaySyncTargets(detectedLibraryType));
+  const [quickSyncTargets, setQuickSyncTargets] = useState<
+    OverlayArtworkTarget[]
+  >(() => getDefaultOverlaySyncTargets(detectedLibraryType));
   const [tmdbLanguage, setTmdbLanguage] = useState<string | undefined>(
     undefined
   );
@@ -406,6 +432,18 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
     if (configData?.enabledOverlays) {
       setEnabledOverlays(configData.enabledOverlays);
     }
+    setFullSyncTargets(
+      normalizeOverlaySyncTargets(
+        configData?.fullSyncTargets,
+        detectedLibraryType
+      )
+    );
+    setQuickSyncTargets(
+      normalizeOverlaySyncTargets(
+        configData?.quickSyncTargets,
+        detectedLibraryType
+      )
+    );
     if (configData?.enableEpisodeScanning !== undefined) {
       setEnableEpisodeScanning(configData.enableEpisodeScanning);
     }
@@ -423,7 +461,7 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
     if (configData?.tmdbLanguage !== undefined) {
       setTmdbLanguage(configData.tmdbLanguage);
     }
-  }, [configData]);
+  }, [configData, detectedLibraryType]);
 
   // Fetch combined preview when enabled overlays change
   const fetchPreview = useCallback(async () => {
@@ -525,9 +563,6 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
     };
   }, [previewUrl]);
 
-  // libraryType comes from the live Plex libraries response. Keep it as the
-  // source of truth instead of allowing an older saved config to drift.
-  const detectedLibraryType = libraryType;
   const templates = (templatesData?.templates || []).filter((template) =>
     isOverlayCompatibleWithLibrary(template.tags, detectedLibraryType)
   );
@@ -569,6 +604,22 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
         ];
       }
     });
+  };
+
+  const toggleSyncTarget = (
+    mode: 'full' | 'quick',
+    target: OverlayArtworkTarget
+  ) => {
+    const update = (current: OverlayArtworkTarget[]) =>
+      current.includes(target)
+        ? current.filter((candidate) => candidate !== target)
+        : [...current, target];
+
+    if (mode === 'full') {
+      setFullSyncTargets(update);
+    } else {
+      setQuickSyncTargets(update);
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -617,6 +668,8 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
             libraryName,
             mediaType: detectedLibraryType,
             enabledOverlays,
+            fullSyncTargets,
+            quickSyncTargets,
             tmdbLanguage: tmdbLanguage || undefined,
             enableEpisodeScanning,
             enableMaintainerrSeasonOverlays,
@@ -764,6 +817,65 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
                   </div>
                 </SortableContext>
               </DndContext>
+            </div>
+          </div>
+
+          <div className="mt-4 border-t border-stone-700 pt-4">
+            <h3 className="text-sm font-semibold text-white">
+              {intl.formatMessage(messages.syncScope)}
+            </h3>
+            <p className="mt-1 text-xs text-stone-400">
+              {intl.formatMessage(messages.syncScopeDescription)}
+            </p>
+            <div className="mt-3 overflow-hidden rounded-md border border-stone-700">
+              <div className="grid grid-cols-[minmax(0,1fr)_100px_100px] bg-stone-800 px-3 py-2 text-xs font-medium text-stone-300">
+                <span>{intl.formatMessage(messages.artwork)}</span>
+                <span className="text-center">
+                  {intl.formatMessage(messages.fullSync)}
+                </span>
+                <span className="text-center">
+                  {intl.formatMessage(messages.quickSync)}
+                </span>
+              </div>
+              {availableSyncTargets.map((target) => {
+                const label =
+                  target === 'main'
+                    ? intl.formatMessage(
+                        detectedLibraryType === 'movie'
+                          ? messages.moviePosters
+                          : messages.showPosters
+                      )
+                    : intl.formatMessage(
+                        target === 'season'
+                          ? messages.seasonPosters
+                          : messages.episodeCards
+                      );
+
+                return (
+                  <div
+                    key={target}
+                    className="grid grid-cols-[minmax(0,1fr)_100px_100px] items-center border-t border-stone-700 px-3 py-2 text-sm text-stone-200"
+                  >
+                    <span>{label}</span>
+                    <label className="flex cursor-pointer justify-center">
+                      <input
+                        type="checkbox"
+                        checked={fullSyncTargets.includes(target)}
+                        onChange={() => toggleSyncTarget('full', target)}
+                        className="h-4 w-4 rounded border-stone-600 text-orange-500 focus:ring-orange-500"
+                      />
+                    </label>
+                    <label className="flex cursor-pointer justify-center">
+                      <input
+                        type="checkbox"
+                        checked={quickSyncTargets.includes(target)}
+                        onChange={() => toggleSyncTarget('quick', target)}
+                        className="h-4 w-4 rounded border-stone-600 text-orange-500 focus:ring-orange-500"
+                      />
+                    </label>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

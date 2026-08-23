@@ -1,5 +1,11 @@
 export type OverlayArtworkTarget = 'main' | 'season' | 'episode';
 
+export const ALL_OVERLAY_ARTWORK_TARGETS: OverlayArtworkTarget[] = [
+  'main',
+  'season',
+  'episode',
+];
+
 const TARGET_TAG_PREFIX = 'target:';
 const TARGET_TAGS = new Set([
   `${TARGET_TAG_PREFIX}main`,
@@ -30,6 +36,38 @@ export function isOverlayCompatibleWithLibrary(
   libraryType: 'movie' | 'show'
 ): boolean {
   return libraryType === 'show' || targetsArtwork(tags, 'main');
+}
+
+export function getDefaultOverlaySyncTargets(
+  libraryType: 'movie' | 'show'
+): OverlayArtworkTarget[] {
+  return libraryType === 'show' ? [...ALL_OVERLAY_ARTWORK_TARGETS] : ['main'];
+}
+
+/**
+ * Normalize persisted/API sync targets. Undefined values get product defaults,
+ * while an explicit empty array remains empty so a job can be disabled for one
+ * library. Movie libraries can never acquire TV-only child targets.
+ */
+export function normalizeOverlaySyncTargets(
+  targets: readonly unknown[] | undefined,
+  libraryType: 'movie' | 'show'
+): OverlayArtworkTarget[] {
+  const requested = targets ?? getDefaultOverlaySyncTargets(libraryType);
+  const allowed =
+    libraryType === 'show'
+      ? new Set<OverlayArtworkTarget>(ALL_OVERLAY_ARTWORK_TARGETS)
+      : new Set<OverlayArtworkTarget>(['main']);
+
+  return Array.from(
+    new Set(
+      requested.filter(
+        (target): target is OverlayArtworkTarget =>
+          typeof target === 'string' &&
+          allowed.has(target as OverlayArtworkTarget)
+      )
+    )
+  );
 }
 
 export function setOverlayTargetTags(

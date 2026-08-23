@@ -3,6 +3,7 @@ import { OverlayLibraryConfig } from '@server/entity/OverlayLibraryConfig';
 import { OverlayTemplate } from '@server/entity/OverlayTemplate';
 import overlayApplication from '@server/lib/overlayApplication';
 import { overlayLibraryService } from '@server/lib/overlays/OverlayLibraryService';
+import { normalizeOverlaySyncTargets } from '@server/lib/overlays/overlayTargets';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { isAuthenticated } from '@server/middleware/auth';
@@ -144,17 +145,40 @@ router.post('/:libraryId', async (req, res, next) => {
       });
     }
 
+    for (const field of ['fullSyncTargets', 'quickSyncTargets'] as const) {
+      if (field in req.body && !Array.isArray(req.body[field])) {
+        return res.status(400).json({
+          error: `${field} must be an array`,
+        });
+      }
+    }
+
     const configRepository = getRepository(OverlayLibraryConfig);
 
     let config = await configRepository.findOne({
       where: { libraryId },
     });
 
+    const fullSyncTargets = normalizeOverlaySyncTargets(
+      'fullSyncTargets' in req.body
+        ? req.body.fullSyncTargets
+        : config?.fullSyncTargets,
+      mediaType
+    );
+    const quickSyncTargets = normalizeOverlaySyncTargets(
+      'quickSyncTargets' in req.body
+        ? req.body.quickSyncTargets
+        : config?.quickSyncTargets,
+      mediaType
+    );
+
     if (config) {
       // Update existing — use 'field' in body checks for partial updates
       config.libraryName = libraryName;
       config.mediaType = mediaType;
       config.enabledOverlays = enabledOverlays;
+      config.fullSyncTargets = fullSyncTargets;
+      config.quickSyncTargets = quickSyncTargets;
       config.tmdbLanguage = tmdbLanguage || undefined;
       if ('enableEpisodeScanning' in req.body) {
         config.enableEpisodeScanning = !!req.body.enableEpisodeScanning;
@@ -176,6 +200,8 @@ router.post('/:libraryId', async (req, res, next) => {
         libraryName,
         mediaType,
         enabledOverlays,
+        fullSyncTargets,
+        quickSyncTargets,
         tmdbLanguage: tmdbLanguage || undefined,
         enableEpisodeScanning: !!req.body.enableEpisodeScanning,
         enableMaintainerrSeasonOverlays:

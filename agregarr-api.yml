@@ -4001,6 +4001,20 @@ components:
                     type: number
                     description: 'For rating badges - minimum rating to display'
                     example: 7.0
+        fullSyncTargets:
+          type: array
+          description: 'Artwork types processed by manual and scheduled full overlay syncs'
+          items:
+            type: string
+            enum: ['main', 'season', 'episode']
+          example: ['main', 'season', 'episode']
+        quickSyncTargets:
+          type: array
+          description: 'Artwork types processed by incremental overlay quick syncs'
+          items:
+            type: string
+            enum: ['main', 'season', 'episode']
+          example: ['main', 'season', 'episode']
         tmdbLanguage:
           type: string
           nullable: true
@@ -15516,6 +15530,18 @@ paths:
                           minimumRating:
                             type: number
                             description: For rating badges - minimum rating to display
+                fullSyncTargets:
+                  type: array
+                  description: Artwork types processed by full overlay syncs
+                  items:
+                    type: string
+                    enum: ['main', 'season', 'episode']
+                quickSyncTargets:
+                  type: array
+                  description: Artwork types processed by overlay quick syncs
+                  items:
+                    type: string
+                    enum: ['main', 'season', 'episode']
                 tmdbLanguage:
                   type: string
                   nullable: true

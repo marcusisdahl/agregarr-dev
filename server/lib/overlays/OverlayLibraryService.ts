@@ -38,7 +38,12 @@ import {
   fetchReleaseDateInfo,
   type ReleaseDateInfo,
 } from './OverlayContextBuilder';
-import { targetsArtwork, type OverlayArtworkTarget } from './overlayTargets';
+import { buildOverlaySyncItems } from './overlaySyncItems';
+import {
+  normalizeOverlaySyncTargets,
+  targetsArtwork,
+  type OverlayArtworkTarget,
+} from './overlayTargets';
 import type { OverlayRenderContext } from './OverlayTemplateRenderer';
 import {
   evaluateCondition,
@@ -79,6 +84,16 @@ export interface OverlayItemInput {
   target?: OverlayArtworkTarget;
   contextFallbackRatingKey?: string;
   contextOverrides?: Partial<OverlayRenderContext>;
+}
+
+export type OverlayItemOutcome = 'success' | 'skipped' | 'error';
+
+export interface OverlayBatchOptions {
+  checkCancelled?: () => boolean;
+  onItemComplete?: (
+    outcome: OverlayItemOutcome,
+    item: OverlayItemInput
+  ) => void;
 }
 
 // TmdbReleaseDateInfo is now imported as ReleaseDateInfo from OverlayContextBuilder
@@ -1408,6 +1423,18 @@ class OverlayLibraryService {
         return;
       }
 
+      const fullSyncTargets = normalizeOverlaySyncTargets(
+        config.fullSyncTargets,
+        config.mediaType
+      );
+      if (fullSyncTargets.length === 0) {
+        logger.info('Full overlay sync disabled for library', {
+          label: 'OverlayLibrary',
+          libraryId,
+        });
+        return;
+      }
+
       // Get enabled overlay templates
       const templateRepository = getRepository(OverlayTemplate);
       const enabledTemplateIds = config.enabledOverlays
@@ -1456,9 +1483,11 @@ class OverlayLibraryService {
             ?.layerOrder || 0;
         return orderA - orderB;
       });
-      const mainTemplates = sortedTemplates.filter((template) =>
-        targetsArtwork(template.getTags(), 'main')
-      );
+      const mainTemplates = fullSyncTargets.includes('main')
+        ? sortedTemplates.filter((template) =>
+            targetsArtwork(template.getTags(), 'main')
+          )
+        : [];
 
       // Pre-analyze all enabled templates to determine which context fields are needed
       // This allows skipping expensive API calls (e.g., RT ratings) if no template uses them
@@ -1494,6 +1523,7 @@ class OverlayLibraryService {
         requiredFields: Array.from(requiredContextFields),
         needsImdbRatings,
         needsRtRatings,
+        syncTargets: fullSyncTargets,
       });
 
       // Fetch Maintainerr collections once for the entire job. Kept job-local (a
@@ -1549,7 +1579,7 @@ class OverlayLibraryService {
 
       // Set total items count
       this.updateProgress(libraryId, (p) => {
-        p.totalItems = allItems.length;
+        p.totalItems = mainTemplates.length > 0 ? allItems.length : 0;
       });
 
       logger.info('Processing library items', {
@@ -1704,7 +1734,7 @@ class OverlayLibraryService {
 
       const active: Promise<void>[] = [];
       try {
-        for (const item of allItems) {
+        for (const item of mainTemplates.length > 0 ? allItems : []) {
           if (checkCancelled?.()) {
             cancelled = true;
             break;
@@ -1737,6 +1767,62 @@ class OverlayLibraryService {
           progress.completedAt = Date.now();
         }
         return;
+      }
+
+      if (config.mediaType === 'show') {
+        const childItems: OverlayItemInput[] = [];
+        const syncSeasons =
+          fullSyncTargets.includes('season') &&
+          sortedTemplates.some((template) =>
+            targetsArtwork(template.getTags(), 'season')
+          );
+        const syncEpisodes =
+          fullSyncTargets.includes('episode') &&
+          sortedTemplates.some((template) =>
+            targetsArtwork(template.getTags(), 'episode')
+          );
+
+        if (syncSeasons) {
+          const seasons = await plexApi.getLibraryItemsByType(libraryId, 3);
+          childItems.push(...buildOverlaySyncItems(seasons, 'season'));
+        }
+
+        if (syncEpisodes && !checkCancelled?.()) {
+          const episodes = await plexApi.getLibraryItemsByType(libraryId, 4);
+          childItems.push(...buildOverlaySyncItems(episodes, 'episode'));
+        }
+
+        if (childItems.length > 0 && !checkCancelled?.()) {
+          this.updateProgress(libraryId, (p) => {
+            p.totalItems += childItems.length;
+          });
+
+          await this.applyOverlaysToCollectionItems(childItems, libraryId, {
+            checkCancelled,
+            onItemComplete: (outcome, item) => {
+              this.updateProgress(libraryId, (p) => {
+                p.currentItem++;
+                p.currentTitle = `${item.target || 'main'} ${item.ratingKey}`;
+                p._recentItemTimes.push(Date.now());
+                if (p._recentItemTimes.length > 20) {
+                  p._recentItemTimes.shift();
+                }
+                if (outcome === 'success') p.successCount++;
+                else if (outcome === 'error') p.errorCount++;
+                else p.skippedCount++;
+              });
+            },
+          });
+        }
+
+        if (checkCancelled?.()) {
+          const progress = this.runningLibraries.get(libraryId);
+          if (progress) {
+            progress.state = 'cancelled';
+            progress.completedAt = Date.now();
+          }
+          return;
+        }
       }
 
       // Seasons never appear in the library listing above; Maintainerr nominates
@@ -1899,7 +1985,8 @@ class OverlayLibraryService {
    */
   async applyOverlaysToCollectionItems(
     items: string[] | OverlayItemInput[],
-    libraryId: string
+    libraryId: string,
+    options: OverlayBatchOptions = {}
   ): Promise<void> {
     try {
       // Initialize caches at start of job (creates if needed, doesn't clear existing)
@@ -1909,6 +1996,10 @@ class OverlayLibraryService {
       const normalizedItems: OverlayItemInput[] = items.map((item) =>
         typeof item === 'string' ? { ratingKey: item } : item
       );
+      const reportOutcome = (
+        outcome: OverlayItemOutcome,
+        item: OverlayItemInput
+      ) => options.onItemComplete?.(outcome, item);
 
       logger.info('Applying overlays to collection items', {
         label: 'OverlayLibrary',
@@ -2048,6 +2139,8 @@ class OverlayLibraryService {
         templateDataArray,
         applicationConditions
       );
+      const previousRequiredContextFields =
+        this.requiredContextFieldsByLibrary.get(libraryId);
       this.requiredContextFieldsByLibrary.set(libraryId, requiredContextFields);
 
       try {
@@ -2120,12 +2213,15 @@ class OverlayLibraryService {
         let successCount = 0;
         let errorCount = 0;
 
-        for (const {
-          ratingKey,
-          target = 'main',
-          contextFallbackRatingKey,
-          contextOverrides,
-        } of normalizedItems) {
+        for (const overlayItem of normalizedItems) {
+          if (options.checkCancelled?.()) break;
+
+          const {
+            ratingKey,
+            target = 'main',
+            contextFallbackRatingKey,
+            contextOverrides,
+          } = overlayItem;
           try {
             // Use batch-prefetched metadata, falling back to individual fetch on miss
             const itemMetadata =
@@ -2141,13 +2237,17 @@ class OverlayLibraryService {
                   target,
                   itemType: itemMetadata.type,
                 });
+                reportOutcome('skipped', overlayItem);
                 continue;
               }
 
               const itemTemplates = sortedTemplates.filter((template) =>
                 targetsArtwork(template.getTags(), target)
               );
-              if (itemTemplates.length === 0) continue;
+              if (itemTemplates.length === 0) {
+                reportOutcome('skipped', overlayItem);
+                continue;
+              }
 
               const isChild =
                 itemMetadata.type === 'episode' ||
@@ -2184,13 +2284,13 @@ class OverlayLibraryService {
               const childImdbId = isChild
                 ? item.Guid?.find((guid) =>
                     guid.id?.startsWith('imdb://')
-                  )?.id.replace('imdb://', '')
+                  )?.id?.replace('imdb://', '')
                 : undefined;
               const childImdbRating = childImdbId
-                ? this.preloadedImdbRatings.get(childImdbId)
+                ? this.preloadedImdbRatings?.get(childImdbId)
                 : undefined;
 
-              await this.applyOverlaysToItem(
+              const result = await this.applyOverlaysToItem(
                 plexApi,
                 item,
                 itemTemplates,
@@ -2210,10 +2310,18 @@ class OverlayLibraryService {
                   ? { ...inheritedContext, imdbRating: childImdbRating }
                   : inheritedContext
               );
-              successCount++;
+              if (result.skipped) {
+                reportOutcome('skipped', overlayItem);
+              } else {
+                successCount++;
+                reportOutcome('success', overlayItem);
+              }
+            } else {
+              reportOutcome('skipped', overlayItem);
             }
           } catch (error) {
             errorCount++;
+            reportOutcome('error', overlayItem);
             logger.error('Failed to apply overlays to collection item', {
               label: 'OverlayLibrary',
               ratingKey,
@@ -2229,7 +2337,14 @@ class OverlayLibraryService {
           totalItems: normalizedItems.length,
         });
       } finally {
-        this.requiredContextFieldsByLibrary.delete(libraryId);
+        if (previousRequiredContextFields) {
+          this.requiredContextFieldsByLibrary.set(
+            libraryId,
+            previousRequiredContextFields
+          );
+        } else {
+          this.requiredContextFieldsByLibrary.delete(libraryId);
+        }
       }
     } catch (error) {
       logger.error('Failed to apply overlays to collection items', {
@@ -3024,16 +3139,25 @@ class OverlayLibraryService {
     );
     const activeSeasonKeys = new Set(activeSeasons.map((s) => s.ratingKey));
 
-    // Only templates that consume daysUntilAction have anything to say about a
-    // season. Rendering the rest would stamp unrelated badges on season posters.
+    // Countdown templates always participate. When the library's full-sync
+    // scope also includes season artwork, include its normal season templates
+    // so this final subpass composes the rating/badges with the countdown rather
+    // than replacing the season overlay produced immediately before it.
     const { extractUsedContextFields } = await import(
       '@server/utils/metadataHashing'
     );
-    const seasonTemplates = sortedTemplates.filter((template) =>
-      extractUsedContextFields(
-        [template.getTemplateData()],
-        [template.getApplicationCondition()]
-      ).has('daysUntilAction')
+    const includeFullSeasonTemplates = normalizeOverlaySyncTargets(
+      config.fullSyncTargets,
+      config.mediaType
+    ).includes('season');
+    const seasonTemplates = sortedTemplates.filter(
+      (template) =>
+        (includeFullSeasonTemplates &&
+          targetsArtwork(template.getTags(), 'season')) ||
+        extractUsedContextFields(
+          [template.getTemplateData()],
+          [template.getApplicationCondition()]
+        ).has('daysUntilAction')
     );
 
     logger.info('Maintainerr season subpass - resolved', {

@@ -799,17 +799,33 @@ class PlexAPI {
     },
     mediaType: 'movie' | 'show'
   ): Promise<PlexLibraryItem[]> {
+    return this.getRecentlyAddedByType(
+      id,
+      options,
+      mediaType === 'show' ? 2 : 1
+    );
+  }
+
+  /**
+   * Fetch recently added items for an exact Plex metadata type.
+   * 1=movie, 2=show, 3=season, 4=episode.
+   */
+  public async getRecentlyAddedByType(
+    id: string,
+    options: { addedAt: number },
+    type: 1 | 2 | 3 | 4
+  ): Promise<PlexLibraryItem[]> {
     const response = await this.plexClient.query<PlexLibraryResponse>({
-      uri: `/library/sections/${id}/all?type=${
-        mediaType === 'show' ? '2' : '1'
-      }&sort=addedAt%3Adesc&addedAt>>=${Math.floor(options.addedAt / 1000)}`,
+      uri: `/library/sections/${id}/all?type=${type}&includeGuids=1&sort=addedAt%3Adesc&addedAt>>=${Math.floor(
+        options.addedAt / 1000
+      )}`,
       extraHeaders: {
         'X-Plex-Container-Start': `0`,
         'X-Plex-Container-Size': `500`,
       },
     });
 
-    return response.MediaContainer.Metadata;
+    return response.MediaContainer.Metadata ?? [];
   }
 
   public async getAllCollections(): Promise<PlexCollection[]> {
