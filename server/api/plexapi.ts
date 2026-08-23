@@ -1,3 +1,4 @@
+import { fetchPlexMetadataBatches } from '@server/api/plexMetadataBatch';
 import type { PlexMetadataSafeResult } from '@server/api/plexMetadataClassify';
 import {
   classifyPlexMetadataResponse,
@@ -636,35 +637,35 @@ class PlexAPI {
   public async getMetadataBatch(
     ratingKeys: string[]
   ): Promise<Map<string, PlexMetadata>> {
-    const result = new Map<string, PlexMetadata>();
-    if (ratingKeys.length === 0) return result;
-
-    // Chunk to avoid URL length limits (ratingKeys are ~5 digits + comma each)
-    const CHUNK_SIZE = 200;
-    for (let i = 0; i < ratingKeys.length; i += CHUNK_SIZE) {
-      const chunk = ratingKeys.slice(i, i + CHUNK_SIZE);
-      try {
+    return fetchPlexMetadataBatches(
+      ratingKeys,
+      async (chunk) => {
         const response = await this.plexClient.query<PlexMetadataResponse>(
           `/library/metadata/${chunk.join(',')}`
         );
-
-        for (const item of response.MediaContainer.Metadata) {
-          result.set(item.ratingKey, item);
-        }
-      } catch (error) {
-        logger.error(
-          'Batch metadata fetch failed, items will fall back to individual fetch',
-          {
+        return response.MediaContainer.Metadata ?? [];
+      },
+      {
+        onRetry: (chunk, error, attempt) =>
+          logger.warn('Plex metadata batch failed transiently; retrying', {
             label: 'Plex API',
             chunkSize: chunk.length,
             totalRequested: ratingKeys.length,
+            attempt,
             error,
-          }
-        );
+          }),
+        onFailure: (chunk, error) =>
+          logger.error(
+            'Plex metadata batch failed after retry and split; unresolved items will use individual fetches',
+            {
+              label: 'Plex API',
+              unresolvedItems: chunk.length,
+              totalRequested: ratingKeys.length,
+              error,
+            }
+          ),
       }
-    }
-
-    return result;
+    );
   }
 
   public async getChildrenMetadata(key: string): Promise<PlexMetadata[]> {

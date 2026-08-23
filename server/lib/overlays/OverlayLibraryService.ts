@@ -26,6 +26,7 @@ import type {
   AggregatedMediaInfo,
   EpisodeMediaInfo,
 } from './episodeMediaTypes';
+import { collectImdbPrefetchCandidates } from './imdbPrefetchCandidates';
 import {
   collectSeasonCandidateKeys,
   computeDaysUntilAction,
@@ -279,6 +280,11 @@ class OverlayLibraryService {
   // TTL for completed jobs (visible to UI before cleanup)
   private static readonly COMPLETED_TTL_MS = 10_000;
 
+  // Child libraries can contain thousands of episodes. Preparing bounded work
+  // groups lets rendering and visible progress begin without waiting for every
+  // episode's Plex/IMDb metadata to be prefetched first.
+  private static readonly CHILD_OVERLAY_BATCH_SIZE = 100;
+
   // Snapshot of last-completed job results per library (survives TTL cleanup)
   private lastCompletedLibraries = new Map<
     string,
@@ -464,8 +470,8 @@ class OverlayLibraryService {
    * with adaptive TTL caching based on content age.
    *
    * Optimizations:
-   * 1. Extract IMDb IDs directly from Plex GUIDs (skips TMDB entirely for most items)
-   * 2. Only call TMDB as fallback for items without IMDb GUIDs
+   * 1. Extract movie, show, and episode IMDb IDs directly from Plex GUIDs
+   * 2. Only call TMDB as fallback for movies/shows without IMDb GUIDs
    * 3. Deduplicate IDs before fetching
    * 4. Check adaptive cache before API calls
    * 5. Cache null ratings to avoid repeated lookups
@@ -498,64 +504,20 @@ class OverlayLibraryService {
       }
       const adaptiveCache = cacheEntry.data;
 
-      // Filter to movies/shows only (skip episodes/seasons)
-      const processableItems = items.filter(
-        (item) => item.type === 'movie' || item.type === 'show'
-      );
+      const { imdbData, needTmdbLookup, processableItems, plexImdbCount } =
+        collectImdbPrefetchCandidates(items);
 
-      if (processableItems.length === 0) {
+      if (processableItems === 0) {
         logger.debug('No items to prefetch IMDb ratings for', {
           label: 'OverlayLibrary',
         });
         return;
       }
 
-      // Step 1: Extract IMDb IDs from Plex GUIDs first (fast path - no API calls)
-      // Only fall back to TMDB for items without IMDb GUIDs
-      const imdbData: Map<
-        string,
-        { imdbId: string; releaseYear: number | undefined }
-      > = new Map();
-      const needTmdbLookup: {
-        tmdbId: number;
-        itemType: 'movie' | 'show';
-        year?: number;
-      }[] = [];
-      let plexImdbCount = 0;
-
-      for (const item of processableItems) {
-        if (!item.Guid || !Array.isArray(item.Guid)) continue;
-
-        // Try to find IMDb ID directly in Plex GUIDs
-        const imdbGuid = item.Guid.find((g) => g.id?.startsWith('imdb://'));
-        if (imdbGuid) {
-          const imdbId = imdbGuid.id.replace('imdb://', '');
-          if (imdbId && !imdbData.has(imdbId)) {
-            imdbData.set(imdbId, { imdbId, releaseYear: item.year });
-            plexImdbCount++;
-          }
-          continue; // Got IMDb ID, no need for TMDB
-        }
-
-        // No IMDb GUID - check if we have TMDB ID for fallback lookup
-        const tmdbGuid = item.Guid.find((g) => g.id?.startsWith('tmdb://'));
-        if (tmdbGuid) {
-          const match = tmdbGuid.id.match(/tmdb:\/\/(\d+)/);
-          if (match) {
-            const tmdbId = parseInt(match[1], 10);
-            // Deduplicate TMDB lookups
-            if (!needTmdbLookup.some((t) => t.tmdbId === tmdbId)) {
-              const itemType = item.type === 'movie' ? 'movie' : 'show';
-              needTmdbLookup.push({ tmdbId, itemType, year: item.year });
-            }
-          }
-        }
-      }
-
       logger.info('Pre-fetching IMDb ratings with adaptive TTL', {
         label: 'OverlayLibrary',
         totalItems: items.length,
-        processableItems: processableItems.length,
+        processableItems,
         imdbFromPlex: plexImdbCount,
         needTmdbLookup: needTmdbLookup.length,
       });
@@ -1821,7 +1783,7 @@ class OverlayLibraryService {
 
       if (config.mediaType === 'show') {
         if (childItems.length > 0 && !checkCancelled?.()) {
-          await this.applyOverlaysToCollectionItems(childItems, libraryId, {
+          const childBatchOptions: OverlayBatchOptions = {
             checkCancelled,
             onItemStart: (item) => {
               this.updateProgress(libraryId, (p) => {
@@ -1846,7 +1808,41 @@ class OverlayLibraryService {
                 recordOverlayTargetOutcome(p.targetProgress, target, outcome);
               });
             },
-          });
+          };
+
+          for (
+            let offset = 0;
+            offset < childItems.length && !checkCancelled?.();
+            offset += OverlayLibraryService.CHILD_OVERLAY_BATCH_SIZE
+          ) {
+            const childBatch = childItems.slice(
+              offset,
+              offset + OverlayLibraryService.CHILD_OVERLAY_BATCH_SIZE
+            );
+            const target = childBatch[0]?.target || 'main';
+
+            this.updateProgress(libraryId, (p) => {
+              p.currentTarget = target;
+              p.currentTitle = `Preparing ${target} metadata (${offset + 1}-${
+                offset + childBatch.length
+              } of ${childItems.length})`;
+            });
+
+            logger.info('Processing child overlay batch', {
+              label: 'OverlayLibrary',
+              libraryId,
+              target,
+              batchStart: offset + 1,
+              batchSize: childBatch.length,
+              totalChildItems: childItems.length,
+            });
+
+            await this.applyOverlaysToCollectionItems(
+              childBatch,
+              libraryId,
+              childBatchOptions
+            );
+          }
         }
 
         if (checkCancelled?.()) {
@@ -2134,7 +2130,6 @@ class OverlayLibraryService {
       const plexItems: PlexLibraryItem[] = [];
       for (const meta of batchMeta.values()) {
         if (meta) {
-          const isChild = meta.type === 'episode' || meta.type === 'season';
           plexItems.push({
             ratingKey: meta.ratingKey,
             parentRatingKey: meta.parentRatingKey,
@@ -2145,9 +2140,12 @@ class OverlayLibraryService {
             guid: meta.guid || '',
             // Child TMDB GUIDs are in the season/episode namespace. IMDb GUIDs
             // remain useful for episode-specific ratings.
-            Guid: isChild
-              ? meta.Guid?.filter((guid) => guid.id?.startsWith('imdb://'))
-              : meta.Guid,
+            Guid:
+              meta.type === 'episode'
+                ? meta.Guid?.filter((guid) => guid.id?.startsWith('imdb://'))
+                : meta.type === 'season'
+                ? undefined
+                : meta.Guid,
             Media: meta.Media,
             Label: meta.Label,
             parentIndex: meta.parentIndex,
@@ -2165,8 +2163,16 @@ class OverlayLibraryService {
       const { extractUsedContextFields } = await import(
         '@server/utils/metadataHashing'
       );
-      const templateDataArray = sortedTemplates.map((t) => t.getTemplateData());
-      const applicationConditions = sortedTemplates.map((t) =>
+      const batchTargets = new Set<OverlayArtworkTarget>(
+        normalizedItems.map((item) => item.target || 'main')
+      );
+      const batchTemplates = sortedTemplates.filter((template) =>
+        Array.from(batchTargets).some((target) =>
+          targetsArtwork(template.getTags(), target)
+        )
+      );
+      const templateDataArray = batchTemplates.map((t) => t.getTemplateData());
+      const applicationConditions = batchTemplates.map((t) =>
         t.getApplicationCondition()
       );
       const requiredContextFields = extractUsedContextFields(
@@ -2297,11 +2303,14 @@ class OverlayLibraryService {
                 year: (itemMetadata as { year?: number }).year,
                 type: itemMetadata.type,
                 guid: itemMetadata.guid || '',
-                Guid: isChild
-                  ? itemMetadata.Guid?.filter((guid) =>
-                      guid.id?.startsWith('imdb://')
-                    )
-                  : itemMetadata.Guid,
+                Guid:
+                  itemMetadata.type === 'episode'
+                    ? itemMetadata.Guid?.filter((guid) =>
+                        guid.id?.startsWith('imdb://')
+                      )
+                    : itemMetadata.type === 'season'
+                    ? undefined
+                    : itemMetadata.Guid,
                 Media: itemMetadata.Media,
                 Label: itemMetadata.Label,
                 parentIndex: itemMetadata.parentIndex,
