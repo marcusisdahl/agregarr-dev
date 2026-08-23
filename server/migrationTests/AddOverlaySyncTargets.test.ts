@@ -1,6 +1,6 @@
+import { AddOverlaySyncTargets1790000000000 } from '@server/migration/1790000000000-AddOverlaySyncTargets';
 import { DataSource } from 'typeorm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AddOverlaySyncTargets1790000000000 } from './1790000000000-AddOverlaySyncTargets';
 
 describe('AddOverlaySyncTargets migration', () => {
   let dataSource: DataSource;
