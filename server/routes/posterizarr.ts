@@ -4,7 +4,8 @@ import { Router } from 'express';
 const router = Router();
 
 router.post('/trigger', (req, res) => {
-  const { ratingKey, title, mediaType } = req.body ?? {};
+  const { ratingKey, title, mediaType, seasonNumber, episodeNumber } =
+    req.body ?? {};
 
   if (typeof ratingKey !== 'string' || !/^[1-9]\d*$/.test(ratingKey.trim())) {
     return res.status(400).json({
@@ -21,12 +22,43 @@ router.post('/trigger', (req, res) => {
   ) {
     return res.status(400).json({ error: 'mediaType must be movie or show' });
   }
+  if (
+    seasonNumber !== undefined &&
+    (!Number.isInteger(seasonNumber) || seasonNumber < 0)
+  ) {
+    return res
+      .status(400)
+      .json({ error: 'seasonNumber must be a non-negative integer' });
+  }
+  if (
+    episodeNumber !== undefined &&
+    (!Number.isInteger(episodeNumber) || episodeNumber < 1)
+  ) {
+    return res
+      .status(400)
+      .json({ error: 'episodeNumber must be a positive integer' });
+  }
+  if (episodeNumber !== undefined && seasonNumber === undefined) {
+    return res
+      .status(400)
+      .json({ error: 'seasonNumber is required with episodeNumber' });
+  }
+  if (
+    (seasonNumber !== undefined || episodeNumber !== undefined) &&
+    mediaType !== 'show'
+  ) {
+    return res.status(400).json({
+      error: 'seasonNumber and episodeNumber are only valid for show triggers',
+    });
+  }
 
   const normalizedRatingKey = ratingKey.trim();
   const result = posterizarrTriggerJob.enqueue({
     ratingKey: normalizedRatingKey,
     title,
     mediaType,
+    seasonNumber,
+    episodeNumber,
   });
 
   return res.status(202).json({

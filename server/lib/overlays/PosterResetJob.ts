@@ -142,6 +142,47 @@ class PosterResetJob {
         offset += pageSize;
       }
 
+      // Child items are not returned by the root library listing. Include only
+      // season/episode rows that Agregarr has actually overlaid, so Reset
+      // Posters also restores artwork created by Posterizarr follow-ups.
+      const metadataService = (
+        await import('@server/lib/metadata/MetadataTrackingService')
+      ).default;
+      const childRows = await metadataService.getOverlaidChildMetadata(
+        libraryId
+      );
+      const existingKeys = new Set(allItems.map((item) => item.ratingKey));
+      for (const row of childRows) {
+        if (existingKeys.has(row.plexItemRatingKey)) continue;
+        try {
+          const child = await plexApi.getMetadata(row.plexItemRatingKey);
+          if (child.type !== 'season' && child.type !== 'episode') continue;
+          allItems.push({
+            ratingKey: child.ratingKey,
+            parentRatingKey: child.parentRatingKey,
+            grandparentRatingKey: child.grandparentRatingKey,
+            title: child.title,
+            guid: child.guid || '',
+            Guid: child.Guid,
+            Media: child.Media,
+            Label: child.Label,
+            type: child.type,
+            index: child.index,
+            parentIndex: child.parentIndex,
+            userRating: child.userRating,
+            addedAt: child.addedAt || 0,
+            updatedAt: child.updatedAt || 0,
+          });
+          existingKeys.add(child.ratingKey);
+        } catch (error) {
+          logger.warn('Tracked child artwork no longer exists in Plex', {
+            label: 'PosterReset',
+            ratingKey: row.plexItemRatingKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       this.total = allItems.length;
 
       logger.info('Found items to reset', {
@@ -228,6 +269,9 @@ class PosterResetJob {
         '@server/lib/overlays/PlexBasePosterManager'
       );
 
+      const isChild = item.type === 'season' || item.type === 'episode';
+      const effectivePosterSource = isChild ? 'plex' : posterSource;
+
       // Fetch full metadata if needed
       const fullMetadata = await plexApi.getMetadata(item.ratingKey);
       const itemWithFullMetadata = {
@@ -267,7 +311,7 @@ class PosterResetJob {
           libraryId,
           libraryName,
           libraryType,
-          posterSource,
+          effectivePosterSource,
           {
             basePosterSource: metadata?.basePosterSource,
             originalPlexPosterUrl: metadata?.originalPlexPosterUrl,
@@ -278,18 +322,18 @@ class PosterResetJob {
           tmdbId
         );
 
-      // Ensure poster is in JPEG format and properly sized
+      // Root posters keep Agregarr's historical 2:3 reset dimensions. Child
+      // artwork preserves its native geometry (especially 16:9 title cards).
       const sourceOwnershipMarker = getRecognizedPosterOwnershipMarker(
         basePosterResult.posterBuffer
       );
-      let posterPipeline = sharp(basePosterResult.posterBuffer).resize(
-        1000,
-        1500,
-        {
+      let posterPipeline = sharp(basePosterResult.posterBuffer);
+      if (!isChild) {
+        posterPipeline = posterPipeline.resize(1000, 1500, {
           fit: 'cover',
           position: 'center',
-        }
-      );
+        });
+      }
 
       // Sharp drops Posterizarr's JPEG comment. Translate a recognized source
       // marker into early JPEG EXIF, but do not mark an unowned base poster.
@@ -329,10 +373,11 @@ class PosterResetJob {
             '', // Empty hash since no overlays applied
             newPosterUrl,
             {
-              basePosterSource: posterSource,
+              basePosterSource: effectivePosterSource,
               originalPlexPosterUrl: basePosterResult.sourceUrl,
               basePosterFilename: basePosterResult.filename,
-            }
+            },
+            item.type
           );
         }
 
@@ -347,7 +392,7 @@ class PosterResetJob {
           label: 'PosterReset',
           itemTitle: item.title,
           ratingKey: item.ratingKey,
-          posterSource,
+          posterSource: effectivePosterSource,
         });
       } finally {
         // Clean up temp file

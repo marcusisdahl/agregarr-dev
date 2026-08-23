@@ -75,12 +75,14 @@ interface PlexLibrariesResponse {
 export interface PlexMetadata {
   ratingKey: string;
   parentRatingKey?: string;
+  grandparentRatingKey?: string;
   guid: string;
   type: 'movie' | 'show' | 'season' | 'episode';
   title: string;
   thumb?: string;
   parentThumb?: string;
   parentTitle?: string;
+  grandparentTitle?: string;
   librarySectionID?: number;
   editionTitle?: string;
   Guid: {
@@ -96,6 +98,7 @@ export interface PlexMetadata {
   parentIndex?: number;
   leafCount: number;
   viewedLeafCount: number;
+  userRating?: number;
   addedAt: number;
   updatedAt: number;
   lastViewedAt?: number;

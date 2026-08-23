@@ -161,6 +161,7 @@ interface Template {
   type: OverlayTemplateType;
   isDefault: boolean;
   applicationCondition?: ApplicationCondition;
+  tags?: string[];
 }
 
 interface EnabledOverlay {
@@ -230,6 +231,11 @@ const SortableTemplateItem: React.FC<SortableTemplateItemProps> = ({
   };
 
   const conditionText = formatCondition(template.applicationCondition);
+  const artworkTargets =
+    template.tags
+      ?.filter((tag) => /^target:(main|season|episode)$/i.test(tag))
+      .map((tag) => tag.slice(7).toLowerCase()) ?? [];
+  if (artworkTargets.length === 0) artworkTargets.push('main');
 
   return (
     <div
@@ -273,6 +279,14 @@ const SortableTemplateItem: React.FC<SortableTemplateItemProps> = ({
             )}
           </button>
           <div className="text-sm font-medium text-white">{template.name}</div>
+          {artworkTargets.map((target) => (
+            <span
+              key={target}
+              className="rounded bg-stone-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-stone-400"
+            >
+              {target}
+            </span>
+          ))}
         </div>
         {/* Expandable details */}
         {isExpanded && (
@@ -438,6 +452,7 @@ const LibraryDetailConfigView: React.FC<LibraryDetailConfigViewProps> = ({
           body: JSON.stringify({
             templateIds: enabledIds,
             contextId: 'modal-config', // Scope deduplication to this modal
+            target: 'main',
           }),
           signal: abortController.signal,
         }

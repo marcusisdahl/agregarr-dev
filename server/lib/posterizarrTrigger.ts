@@ -5,11 +5,15 @@ export interface PosterizarrTriggerInput {
   ratingKey: string;
   title?: string;
   mediaType?: 'movie' | 'show';
+  seasonNumber?: number;
+  episodeNumber?: number;
 }
 
 export interface PosterizarrTriggerResult {
   ratingKey: string;
   title?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
   state: 'completed' | 'failed';
   startedAt: string;
   completedAt: string;
@@ -30,7 +34,7 @@ async function waitForConflictingJobs(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
-  while (true) {
+  while (Date.now() < deadline) {
     const collectionsSync = (await import('@server/lib/collectionsSync'))
       .default;
     const collectionsQuickSync = (
@@ -54,11 +58,10 @@ async function waitForConflictingJobs(
       libraryBusy;
 
     if (!busy) return;
-    if (Date.now() >= deadline) {
-      throw new Error('Timed out waiting for another collection/overlay job');
-    }
     await wait(1000);
   }
+
+  throw new Error('Timed out waiting for another collection/overlay job');
 }
 
 async function processTriggeredItem(
@@ -99,8 +102,8 @@ async function processTriggeredItem(
   const { overlayLibraryService } = await import(
     '@server/lib/overlays/OverlayLibraryService'
   );
-  await overlayLibraryService.applyOverlaysToCollectionItems(
-    [input.ratingKey],
+  await overlayLibraryService.applyPosterizarrTriggeredOverlays(
+    input,
     collectionResult.libraryId
   );
 
@@ -127,6 +130,14 @@ export class PosterizarrTriggerJob {
     private readonly dedupeWindowMs = 60_000
   ) {}
 
+  private fingerprint(input: PosterizarrTriggerInput): string {
+    return [
+      input.ratingKey,
+      input.seasonNumber ?? '-',
+      input.episodeNumber ?? '-',
+    ].join(':');
+  }
+
   public get status() {
     this.pruneCompleted();
     return {
@@ -143,17 +154,18 @@ export class PosterizarrTriggerJob {
     position: number;
   } {
     this.pruneCompleted();
+    const fingerprint = this.fingerprint(input);
     const duplicate =
-      this.current?.ratingKey === input.ratingKey ||
-      this.queuedKeys.has(input.ratingKey) ||
-      this.recentlyCompleted.has(input.ratingKey);
+      (this.current && this.fingerprint(this.current) === fingerprint) ||
+      this.queuedKeys.has(fingerprint) ||
+      this.recentlyCompleted.has(fingerprint);
 
     if (duplicate) {
       return { queued: false, deduplicated: true, position: 0 };
     }
 
     this.queue.push(input);
-    this.queuedKeys.add(input.ratingKey);
+    this.queuedKeys.add(fingerprint);
     const position = this.queue.length;
     if (!this.drainPromise) {
       this.drainPromise = this.drain().finally(() => {
@@ -180,7 +192,8 @@ export class PosterizarrTriggerJob {
       const input = this.queue.shift();
       if (!input) continue;
 
-      this.queuedKeys.delete(input.ratingKey);
+      const fingerprint = this.fingerprint(input);
+      this.queuedKeys.delete(fingerprint);
       this.current = input;
       const startedAt = new Date().toISOString();
 
@@ -193,6 +206,8 @@ export class PosterizarrTriggerJob {
         this.lastResult = {
           ratingKey: input.ratingKey,
           title: input.title ?? collectionResult.title,
+          seasonNumber: input.seasonNumber,
+          episodeNumber: input.episodeNumber,
           state: 'completed',
           startedAt,
           completedAt: new Date().toISOString(),
@@ -207,6 +222,8 @@ export class PosterizarrTriggerJob {
         this.lastResult = {
           ratingKey: input.ratingKey,
           title: input.title,
+          seasonNumber: input.seasonNumber,
+          episodeNumber: input.episodeNumber,
           state: 'failed',
           startedAt,
           completedAt: new Date().toISOString(),
@@ -217,7 +234,7 @@ export class PosterizarrTriggerJob {
           ...this.lastResult,
         });
       } finally {
-        this.recentlyCompleted.set(input.ratingKey, Date.now());
+        this.recentlyCompleted.set(fingerprint, Date.now());
         this.current = null;
       }
     }

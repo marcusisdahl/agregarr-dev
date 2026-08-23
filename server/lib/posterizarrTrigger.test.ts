@@ -69,6 +69,33 @@ describe('PosterizarrTriggerJob', () => {
     expect(processor).toHaveBeenCalledTimes(1);
   });
 
+  it('queues different episodes of the same show independently', async () => {
+    const processed: string[] = [];
+    const processor = vi.fn(async (input: PosterizarrTriggerInput) => {
+      processed.push(
+        `${input.ratingKey}:S${input.seasonNumber}E${input.episodeNumber}`
+      );
+      return resultFor(input);
+    });
+    const job = new PosterizarrTriggerJob(processor);
+
+    job.enqueue({
+      ratingKey: '20',
+      mediaType: 'show',
+      seasonNumber: 1,
+      episodeNumber: 1,
+    });
+    job.enqueue({
+      ratingKey: '20',
+      mediaType: 'show',
+      seasonNumber: 1,
+      episodeNumber: 2,
+    });
+    await job.waitForIdle();
+
+    expect(processed).toEqual(['20:S1E1', '20:S1E2']);
+  });
+
   it('continues with the next item after a failed callback', async () => {
     const processor = vi
       .fn()

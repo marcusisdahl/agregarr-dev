@@ -105,6 +105,7 @@ const LibraryPreviewLarge: React.FC<{
           body: JSON.stringify({
             templateIds: enabledIds,
             contextId: `library-${libraryId}`, // Each library gets its own context
+            target: 'main',
           }),
           signal: abortController.signal,
         }

@@ -15618,7 +15618,7 @@ paths:
   /posterizarr/trigger:
     post:
       summary: Queue collection and overlay processing for a Posterizarr item
-      description: Resolves the Plex library from the rating key, incrementally adds the item to known collections, then applies the library's configured overlays. Duplicate callbacks are coalesced.
+      description: Resolves the Plex library from the rating key, incrementally adds the item to known collections, then applies target-scoped overlays. Sonarr callbacks may include season and episode numbers; Agregarr resolves their Plex child keys. Duplicate callbacks for the same root and child coordinates are coalesced.
       tags:
         - overlays
       requestBody:
@@ -15637,6 +15637,16 @@ paths:
                 mediaType:
                   type: string
                   enum: [movie, show]
+                seasonNumber:
+                  type: integer
+                  minimum: 0
+                  description: Sonarr season number; valid only for show triggers
+                  example: 2
+                episodeNumber:
+                  type: integer
+                  minimum: 1
+                  description: Sonarr episode number; requires seasonNumber
+                  example: 5
               required:
                 - ratingKey
       responses:

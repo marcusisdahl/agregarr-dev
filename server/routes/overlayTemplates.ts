@@ -9,6 +9,10 @@ import type {
 } from '@server/entity/OverlayTemplate';
 import { OverlayTemplate } from '@server/entity/OverlayTemplate';
 import { extractStreamingProvider } from '@server/lib/overlays/OverlayContextBuilder';
+import {
+  targetsArtwork,
+  type OverlayArtworkTarget,
+} from '@server/lib/overlays/overlayTargets';
 import { overlayTemplateRenderer } from '@server/lib/overlays/OverlayTemplateRenderer';
 import { presetTemplateService } from '@server/lib/overlays/PresetTemplates';
 import { createSampleOverlayContext } from '@server/lib/overlays/sampleOverlayContext';
@@ -803,9 +807,14 @@ router.get('/:id/preview', async (req, res, next) => {
 // POST /api/v1/overlay-templates/combined-preview - Generate preview with multiple overlays
 router.post('/combined-preview', async (req, res, next) => {
   try {
-    const { templateIds, contextId } = req.body as {
+    const {
+      templateIds,
+      contextId,
+      target = 'main',
+    } = req.body as {
       templateIds: number[];
       contextId?: string;
+      target?: OverlayArtworkTarget;
     };
 
     if (
@@ -816,6 +825,9 @@ router.post('/combined-preview', async (req, res, next) => {
       return res.status(400).json({
         error: 'templateIds array is required',
       });
+    }
+    if (!['main', 'season', 'episode'].includes(target)) {
+      return res.status(400).json({ error: 'Invalid artwork target' });
     }
 
     // Use contextId to scope deduplication (default to 'global' for backward compatibility)
@@ -853,7 +865,10 @@ router.post('/combined-preview', async (req, res, next) => {
     // Sort templates by the order they appear in templateIds (preserves layer order)
     const orderedTemplates = templateIds
       .map((id) => templates.find((t) => t.id === id))
-      .filter((t): t is OverlayTemplate => t !== undefined);
+      .filter(
+        (t): t is OverlayTemplate =>
+          t !== undefined && targetsArtwork(t.getTags(), target)
+      );
 
     // Get list of preview posters
     const postersDir = path.join(process.cwd(), 'public', 'preview-posters');

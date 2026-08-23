@@ -38,6 +38,7 @@ import {
   fetchReleaseDateInfo,
   type ReleaseDateInfo,
 } from './OverlayContextBuilder';
+import { targetsArtwork, type OverlayArtworkTarget } from './overlayTargets';
 import type { OverlayRenderContext } from './OverlayTemplateRenderer';
 import {
   evaluateCondition,
@@ -54,9 +55,9 @@ import { restoreSeasonBasePoster } from './seasonPosterRestore';
 /**
  * Resolve the base poster source for an item.
  *
- * Seasons always use Plex. Their Plex guid carries a TMDB id in TMDB's *season*
- * namespace, which resolves to an unrelated show on the endpoints the TMDB and
- * local sources call, so those sources are structurally unreachable for a season.
+ * Child artwork always uses Plex. Season and episode GUIDs live in different
+ * provider namespaces than their parent show, and title cards have no TMDB
+ * poster equivalent.
  * Both read sites in `applyOverlaysToItem` go through here so the value written to
  * `basePosterSource` matches the one the `basePosterSourceChanged` gate compares
  * against - otherwise every run would see a changed source and re-upload.
@@ -65,7 +66,7 @@ function resolveBasePosterSource(
   itemType: PlexLibraryItem['type'],
   settings: ReturnType<typeof getSettings>
 ): 'tmdb' | 'plex' | 'local' {
-  return itemType === 'season'
+  return itemType === 'season' || itemType === 'episode'
     ? 'plex'
     : settings.overlays?.defaultPosterSource || 'tmdb';
 }
@@ -75,6 +76,8 @@ function resolveBasePosterSource(
  */
 export interface OverlayItemInput {
   ratingKey: string;
+  target?: OverlayArtworkTarget;
+  contextFallbackRatingKey?: string;
   contextOverrides?: Partial<OverlayRenderContext>;
 }
 
@@ -1453,6 +1456,9 @@ class OverlayLibraryService {
             ?.layerOrder || 0;
         return orderA - orderB;
       });
+      const mainTemplates = sortedTemplates.filter((template) =>
+        targetsArtwork(template.getTags(), 'main')
+      );
 
       // Pre-analyze all enabled templates to determine which context fields are needed
       // This allows skipping expensive API calls (e.g., RT ratings) if no template uses them
@@ -1621,6 +1627,14 @@ class OverlayLibraryService {
           return;
         }
 
+        if (mainTemplates.length === 0) {
+          this.updateProgress(libraryId, (p) => {
+            p.currentItem++;
+            p.skippedCount++;
+          });
+          return;
+        }
+
         this.updateProgress(libraryId, (p) => {
           p.currentTitle = item.title || '';
         });
@@ -1639,7 +1653,7 @@ class OverlayLibraryService {
           const result = await this.applyOverlaysToItem(
             plexApi,
             itemWithFullMetadata,
-            sortedTemplates,
+            mainTemplates,
             config.mediaType,
             libraryId,
             config.libraryName,
@@ -1798,6 +1812,85 @@ class OverlayLibraryService {
   }
 
   /**
+   * Apply the root poster plus the season/episode artwork named by a
+   * Posterizarr Sonarr callback. Child rating keys are resolved from Plex here
+   * so the callback cannot nominate an unrelated library item.
+   */
+  async applyPosterizarrTriggeredOverlays(
+    input: {
+      ratingKey: string;
+      mediaType?: 'movie' | 'show';
+      seasonNumber?: number;
+      episodeNumber?: number;
+    },
+    libraryId: string
+  ): Promise<void> {
+    const items: OverlayItemInput[] = [
+      { ratingKey: input.ratingKey, target: 'main' },
+    ];
+
+    if (input.mediaType === 'show' && input.seasonNumber !== undefined) {
+      const { getAdminUser } = await import(
+        '@server/lib/collections/core/CollectionUtilities'
+      );
+      const admin = await getAdminUser();
+      if (!admin) throw new Error('No admin user found');
+
+      const plexApi = new PlexAPI({ plexToken: admin.plexToken });
+      const seasons = await plexApi.getChildrenMetadata(input.ratingKey);
+      const season = seasons.find(
+        (candidate) =>
+          candidate.type === 'season' && candidate.index === input.seasonNumber
+      );
+
+      if (!season) {
+        logger.warn('Posterizarr trigger season was not found in Plex', {
+          label: 'Posterizarr Trigger',
+          ratingKey: input.ratingKey,
+          seasonNumber: input.seasonNumber,
+        });
+      } else {
+        items.push({
+          ratingKey: season.ratingKey,
+          target: 'season',
+          contextFallbackRatingKey: input.ratingKey,
+          contextOverrides: { seasonNumber: input.seasonNumber },
+        });
+
+        if (input.episodeNumber !== undefined) {
+          const episodes = await plexApi.getChildrenMetadata(season.ratingKey);
+          const episode = episodes.find(
+            (candidate) =>
+              candidate.type === 'episode' &&
+              candidate.index === input.episodeNumber
+          );
+
+          if (!episode) {
+            logger.warn('Posterizarr trigger episode was not found in Plex', {
+              label: 'Posterizarr Trigger',
+              ratingKey: input.ratingKey,
+              seasonNumber: input.seasonNumber,
+              episodeNumber: input.episodeNumber,
+            });
+          } else {
+            items.push({
+              ratingKey: episode.ratingKey,
+              target: 'episode',
+              contextFallbackRatingKey: input.ratingKey,
+              contextOverrides: {
+                seasonNumber: input.seasonNumber,
+                episodeNumber: input.episodeNumber,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    await this.applyOverlaysToCollectionItems(items, libraryId);
+  }
+
+  /**
    * Apply overlays to specific collection items only
    * Used by "Apply overlays during sync" feature
    *
@@ -1900,24 +1993,41 @@ class OverlayLibraryService {
       const mediaType = config.mediaType || 'movie';
 
       // Batch-fetch metadata for all items in a single Plex call
-      const itemRatingKeys = normalizedItems.map((i) => i.ratingKey);
+      const itemRatingKeys = [
+        ...new Set(
+          normalizedItems.flatMap((item) => [
+            item.ratingKey,
+            ...(item.contextFallbackRatingKey
+              ? [item.contextFallbackRatingKey]
+              : []),
+          ])
+        ),
+      ];
       const batchMeta = await plexApi.getMetadataBatch(itemRatingKeys);
 
       // Convert batch metadata to PlexLibraryItem[] for prefetch
       const plexItems: PlexLibraryItem[] = [];
       for (const meta of batchMeta.values()) {
-        if (meta && meta.type !== 'episode' && meta.type !== 'season') {
+        if (meta) {
+          const isChild = meta.type === 'episode' || meta.type === 'season';
           plexItems.push({
             ratingKey: meta.ratingKey,
+            parentRatingKey: meta.parentRatingKey,
+            grandparentRatingKey: meta.grandparentRatingKey,
             title: meta.title,
             year: (meta as { year?: number }).year,
             type: meta.type,
             guid: meta.guid || '',
-            Guid: meta.Guid,
+            // Child TMDB GUIDs are in the season/episode namespace. IMDb GUIDs
+            // remain useful for episode-specific ratings.
+            Guid: isChild
+              ? meta.Guid?.filter((guid) => guid.id?.startsWith('imdb://'))
+              : meta.Guid,
             Media: meta.Media,
             Label: meta.Label,
             parentIndex: meta.parentIndex,
             index: meta.index,
+            userRating: meta.userRating,
             addedAt: meta.addedAt || 0,
             updatedAt: meta.updatedAt || 0,
             editionTitle: (meta as { editionTitle?: string }).editionTitle,
@@ -1957,6 +2067,45 @@ class OverlayLibraryService {
           await this.prefetchTmdbReleaseDates(plexItems);
         }
 
+        const fallbackContexts = new Map<
+          string,
+          Partial<OverlayRenderContext>
+        >();
+        for (const fallbackRatingKey of new Set(
+          normalizedItems
+            .map((item) => item.contextFallbackRatingKey)
+            .filter((key): key is string => Boolean(key))
+        )) {
+          const fallbackMetadata = batchMeta.get(fallbackRatingKey);
+          if (!fallbackMetadata) continue;
+
+          const fallbackItem = {
+            ratingKey: fallbackMetadata.ratingKey,
+            title: fallbackMetadata.title,
+            year: (fallbackMetadata as { year?: number }).year,
+            type: fallbackMetadata.type,
+            guid: fallbackMetadata.guid || '',
+            Guid: fallbackMetadata.Guid,
+            Media: fallbackMetadata.Media,
+            Label: fallbackMetadata.Label,
+            userRating: fallbackMetadata.userRating,
+            addedAt: fallbackMetadata.addedAt || 0,
+            updatedAt: fallbackMetadata.updatedAt || 0,
+          } as PlexLibraryItem;
+          const fallbackResult = await buildRenderContext(
+            fallbackItem,
+            fallbackItem.type === 'movie' ? 'movie' : 'show',
+            false,
+            undefined,
+            this.preloadedImdbRatings,
+            requiredContextFields,
+            seasonFallbackFor(config)
+          );
+          if (!fallbackResult.criticalApiFailed) {
+            fallbackContexts.set(fallbackRatingKey, fallbackResult.context);
+          }
+        }
+
         // Load episode-derived quality data (resolution/HDR/DV) for show
         // libraries from the persisted episode-media cache so background and
         // collection syncs keep quality badges. runEpisodeScan is the
@@ -1971,7 +2120,12 @@ class OverlayLibraryService {
         let successCount = 0;
         let errorCount = 0;
 
-        for (const { ratingKey, contextOverrides } of normalizedItems) {
+        for (const {
+          ratingKey,
+          target = 'main',
+          contextFallbackRatingKey,
+          contextOverrides,
+        } of normalizedItems) {
           try {
             // Use batch-prefetched metadata, falling back to individual fetch on miss
             const itemMetadata =
@@ -1979,36 +2133,67 @@ class OverlayLibraryService {
               (await plexApi.getMetadata(ratingKey));
 
             if (itemMetadata) {
-              // CRITICAL: Skip episodes and seasons - overlays only apply to movies and shows
-              if (
-                itemMetadata.type === 'episode' ||
-                itemMetadata.type === 'season'
-              ) {
+              const expectedType = target === 'main' ? mediaType : target;
+              if (itemMetadata.type !== expectedType) {
+                logger.warn('Skipping overlay item with mismatched target', {
+                  label: 'OverlayLibrary',
+                  ratingKey,
+                  target,
+                  itemType: itemMetadata.type,
+                });
                 continue;
               }
+
+              const itemTemplates = sortedTemplates.filter((template) =>
+                targetsArtwork(template.getTags(), target)
+              );
+              if (itemTemplates.length === 0) continue;
+
+              const isChild =
+                itemMetadata.type === 'episode' ||
+                itemMetadata.type === 'season';
 
               // Convert to PlexLibraryItem format (cast to satisfy type requirements)
               const item = {
                 ratingKey: itemMetadata.ratingKey,
+                parentRatingKey: itemMetadata.parentRatingKey,
+                grandparentRatingKey: itemMetadata.grandparentRatingKey,
                 title: itemMetadata.title,
                 year: (itemMetadata as { year?: number }).year,
                 type: itemMetadata.type,
                 guid: itemMetadata.guid || '',
-                Guid: itemMetadata.Guid,
+                Guid: isChild
+                  ? itemMetadata.Guid?.filter((guid) =>
+                      guid.id?.startsWith('imdb://')
+                    )
+                  : itemMetadata.Guid,
                 Media: itemMetadata.Media,
                 Label: itemMetadata.Label,
                 parentIndex: itemMetadata.parentIndex,
                 index: itemMetadata.index,
+                userRating: itemMetadata.userRating,
                 addedAt: itemMetadata.addedAt || 0,
                 updatedAt: itemMetadata.updatedAt || 0,
                 editionTitle: (itemMetadata as { editionTitle?: string })
                   .editionTitle,
               } as PlexLibraryItem;
 
+              const inheritedContext = contextFallbackRatingKey
+                ? fallbackContexts.get(contextFallbackRatingKey)
+                : undefined;
+              const childImdbId = isChild
+                ? item.Guid?.find((guid) =>
+                    guid.id?.startsWith('imdb://')
+                  )?.id.replace('imdb://', '')
+                : undefined;
+              const childImdbRating = childImdbId
+                ? this.preloadedImdbRatings.get(childImdbId)
+                : undefined;
+
               await this.applyOverlaysToItem(
                 plexApi,
                 item,
-                sortedTemplates,
+                itemTemplates,
                 mediaType,
                 libraryId,
                 config.libraryName,
@@ -2019,7 +2204,11 @@ class OverlayLibraryService {
                 // Moot without collections, but kept honest to the config.
                 seasonFallbackFor(config),
                 contextOverrides,
-                aggregatedMedia
+                aggregatedMedia,
+                undefined,
+                childImdbRating !== undefined && childImdbRating !== null
+                  ? { ...inheritedContext, imdbRating: childImdbRating }
+                  : inheritedContext
               );
               successCount++;
             }
@@ -2080,7 +2269,8 @@ class OverlayLibraryService {
     seasonFallback: SeasonFallback,
     contextOverrides?: Partial<OverlayRenderContext>,
     aggregatedMediaOverride?: Map<string, AggregatedMediaInfo>,
-    requireOverlayMatch?: boolean
+    requireOverlayMatch?: boolean,
+    contextFallbacks?: Partial<OverlayRenderContext>
   ): Promise<OverlayApplyResult> {
     try {
       // CRITICAL: Derive actual media type from item.type, not library config
@@ -2315,6 +2505,7 @@ class OverlayLibraryService {
       const collection = this.collectionMembershipCache?.get(item.ratingKey);
 
       const context: OverlayRenderContext = {
+        ...contextFallbacks,
         ...baseContext,
         isPlaceholder: actualIsPlaceholder,
         downloaded,
@@ -2626,7 +2817,8 @@ class OverlayLibraryService {
                 localPosterModifiedTime: basePosterResult.fileModTime,
               },
               // Raw item.type on purpose - NOT actualMediaType. itemType must
-              // preserve the exact Plex kind ('movie' | 'show' | 'season') for
+              // preserve the exact Plex kind ('movie' | 'show' | 'season' |
+              // 'episode') for
               // the season cleanup lifecycle's exact-match query;
               // actualMediaType deliberately collapses 'season' -> 'show' for
               // TMDB namespace resolution and would erase that distinction.
