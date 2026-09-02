@@ -8,6 +8,12 @@ import {
   EyeIcon,
   XMarkIcon,
 } from '@heroicons/react/24/solid';
+import {
+  getOverlayTargets,
+  isOverlayTargetTag,
+  setOverlayTargetTags,
+  type OverlayArtworkTarget,
+} from '@server/lib/overlays/overlayTargets';
 import type React from 'react';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { defineMessages, useIntl } from 'react-intl';
@@ -90,10 +96,8 @@ const DEFAULT_OVERLAY_DATA: OverlayTemplateData = {
 };
 
 const DEFAULT_TAGS: string[] = [];
-type ArtworkTarget = 'main' | 'season' | 'episode';
+type ArtworkTarget = OverlayArtworkTarget;
 const ARTWORK_TARGETS: ArtworkTarget[] = ['main', 'season', 'episode'];
-const isTargetTag = (tag: string) =>
-  /^target:(main|season|episode)$/i.test(tag.trim());
 
 interface PreviewPostersResponse {
   posters: PreviewPosterInfo[];
@@ -179,13 +183,7 @@ export const OverlayEditorModal: React.FC<OverlayEditorModalProps> = ({
   // Tags state
   const [tags, setTags] = useState<string[]>(initialTags);
   const [tagInput, setTagInput] = useState('');
-  const selectedArtworkTargets: ArtworkTarget[] = tags
-    .filter(isTargetTag)
-    .map((tag) => tag.trim().toLowerCase().slice(7) as ArtworkTarget);
-  const effectiveArtworkTargets =
-    selectedArtworkTargets.length > 0
-      ? selectedArtworkTargets
-      : (['main'] as ArtworkTarget[]);
+  const effectiveArtworkTargets = getOverlayTargets(tags);
 
   const toggleArtworkTarget = (target: ArtworkTarget) => {
     const nextTargets = effectiveArtworkTargets.includes(target)
@@ -193,10 +191,7 @@ export const OverlayEditorModal: React.FC<OverlayEditorModalProps> = ({
       : [...effectiveArtworkTargets, target];
     if (nextTargets.length === 0) return;
 
-    setTags([
-      ...tags.filter((tag) => !isTargetTag(tag)),
-      ...nextTargets.map((candidate) => `target:${candidate}`),
-    ]);
+    setTags(setOverlayTargetTags(tags, nextTargets));
 
     if (
       target === 'episode' &&
@@ -561,10 +556,10 @@ export const OverlayEditorModal: React.FC<OverlayEditorModalProps> = ({
                           {intl.formatMessage(messages.tags)}
                         </label>
                         {/* Tag chips */}
-                        {tags.some((tag) => !isTargetTag(tag)) && (
+                        {tags.some((tag) => !isOverlayTargetTag(tag)) && (
                           <div className="mb-2 flex flex-wrap gap-1">
                             {tags
-                              .filter((tag) => !isTargetTag(tag))
+                              .filter((tag) => !isOverlayTargetTag(tag))
                               .map((tag) => (
                                 <span
                                   key={tag}

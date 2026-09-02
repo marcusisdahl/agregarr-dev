@@ -23,6 +23,7 @@ describe('episode rating eligibility', () => {
       new Map([['tt123', null]]),
     ],
     ['unavailable rating cache', [{ id: 'imdb://tt123' }], undefined],
+    ['a zero rating', [{ id: 'imdb://tt123' }], new Map([['tt123', 0]])],
   ])('rejects an episode with %s', (_label, guids, ratings) => {
     expect(getEpisodeRatingEligibility(guids, ratings).eligible).toBe(false);
   });

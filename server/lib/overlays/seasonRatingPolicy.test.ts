@@ -67,6 +67,21 @@ describe('season IMDb rating policy', () => {
     ).toEqual(new Map());
   });
 
+  it('ignores zero ratings when calculating a season average', () => {
+    expect(
+      calculateSeasonImdbRatings(
+        [
+          episode('episode-101', 'season-1', 'tt101'),
+          episode('episode-102', 'season-1', 'tt102'),
+        ],
+        new Map([
+          ['tt101', 0],
+          ['tt102', 8],
+        ])
+      )
+    ).toEqual(new Map([['season-1', 8]]));
+  });
+
   it('does not count a duplicate episode twice', () => {
     const duplicate = episode('episode-101', 'season-1', 'tt101');
 

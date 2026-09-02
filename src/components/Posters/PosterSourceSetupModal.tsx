@@ -13,6 +13,9 @@ const messages = defineMessages({
   outputQuality: 'Output JPEG Quality',
   outputQualityDescription:
     'Applies to movie and show posters, season posters, and episode artwork. Higher values preserve fine text and colour detail but create larger files. It preserves the source dimensions rather than upscaling low-resolution artwork.',
+  posterizarrIntegration: 'Posterizarr Integration',
+  posterizarrIntegrationDescription:
+    'Allow authenticated Posterizarr callbacks to start targeted collection and overlay processing. Keep this off unless Posterizarr is configured to call this Agregarr instance.',
   tmdbOption: 'TMDB Posters',
   tmdbDescription:
     'Grabs the most popular poster from TMDB every run, language option can be selected in Settings -> General',
@@ -69,6 +72,7 @@ interface PosterSourceSetupModalProps {
   isInitialSetup?: boolean; // True if this is first-time setup, false if changing settings later
   currentPosterSource?: 'tmdb' | 'plex' | 'local'; // Current saved poster source
   currentJpegQuality?: number;
+  currentPosterizarrIntegrationEnabled?: boolean;
 }
 
 interface OperationStatus {
@@ -102,6 +106,7 @@ const PosterSourceSetupModal: React.FC<PosterSourceSetupModalProps> = ({
   // TODO: Change default to 'plex' before release to latest (currently 'tmdb' to protect existing develop users)
   currentPosterSource = 'tmdb',
   currentJpegQuality = 95,
+  currentPosterizarrIntegrationEnabled = false,
 }) => {
   const intl = useIntl();
   const { addToast } = useToasts();
@@ -110,6 +115,8 @@ const PosterSourceSetupModal: React.FC<PosterSourceSetupModalProps> = ({
     'tmdb' | 'plex' | 'local'
   >(currentPosterSource);
   const [jpegQuality, setJpegQuality] = useState(currentJpegQuality);
+  const [posterizarrIntegrationEnabled, setPosterizarrIntegrationEnabled] =
+    useState(currentPosterizarrIntegrationEnabled);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState<DownloadStatus | null>(
     null
@@ -129,10 +136,16 @@ const PosterSourceSetupModal: React.FC<PosterSourceSetupModalProps> = ({
     if (isOpen) {
       setSelectedSource(currentPosterSource);
       setJpegQuality(currentJpegQuality);
+      setPosterizarrIntegrationEnabled(currentPosterizarrIntegrationEnabled);
       setShowRedownloadConfirm(false);
       setRedownloadConfirmText('');
     }
-  }, [isOpen, currentPosterSource, currentJpegQuality]);
+  }, [
+    isOpen,
+    currentPosterSource,
+    currentJpegQuality,
+    currentPosterizarrIntegrationEnabled,
+  ]);
 
   // Close re-download confirmation when switching away from Plex
   useEffect(() => {
@@ -310,6 +323,7 @@ const PosterSourceSetupModal: React.FC<PosterSourceSetupModalProps> = ({
         body: JSON.stringify({
           defaultPosterSource: selectedSource,
           jpegQuality,
+          posterizarrIntegrationEnabled,
         }),
       });
 
@@ -364,6 +378,7 @@ const PosterSourceSetupModal: React.FC<PosterSourceSetupModalProps> = ({
         body: JSON.stringify({
           defaultPosterSource: selectedSource,
           jpegQuality,
+          posterizarrIntegrationEnabled,
         }),
       });
 
@@ -411,6 +426,29 @@ const PosterSourceSetupModal: React.FC<PosterSourceSetupModalProps> = ({
           <p className="text-sm text-gray-300">
             {intl.formatMessage(messages.description)}
           </p>
+
+          <div className="rounded-lg border-2 border-gray-600 p-4">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={posterizarrIntegrationEnabled}
+                onChange={(event) =>
+                  setPosterizarrIntegrationEnabled(event.target.checked)
+                }
+                className="mt-1"
+              />
+              <span>
+                <span className="block font-medium text-white">
+                  {intl.formatMessage(messages.posterizarrIntegration)}
+                </span>
+                <span className="mt-1 block text-sm text-gray-400">
+                  {intl.formatMessage(
+                    messages.posterizarrIntegrationDescription
+                  )}
+                </span>
+              </span>
+            </label>
+          </div>
 
           <div className="rounded-lg border-2 border-gray-600 p-4">
             <div className="mb-2 flex items-center justify-between gap-4">

@@ -69,4 +69,25 @@ describe('resilient Plex metadata batching', () => {
     expect(Array.from(result.keys())).toEqual(['1', '2', '3']);
     expect(onFailure).toHaveBeenCalledWith(['bad'], expect.any(Error));
   });
+
+  it('does not split a non-retryable Plex authorization failure', async () => {
+    const unauthorized = Object.assign(new Error('Request failed with 401'), {
+      response: { status: 401 },
+    });
+    const query = vi.fn(async () => {
+      throw unauthorized;
+    });
+    const onFailure = vi.fn();
+
+    await fetchPlexMetadataBatches(['1', '2', '3', '4'], query, {
+      chunkSize: 4,
+      minChunkSize: 1,
+      maxRetries: 2,
+      retryDelayMs: 0,
+      onFailure,
+    });
+
+    expect(query).toHaveBeenCalledOnce();
+    expect(onFailure).toHaveBeenCalledWith(['1', '2', '3', '4'], unauthorized);
+  });
 });

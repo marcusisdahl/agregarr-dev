@@ -1,4 +1,6 @@
 import type PlexAPI from '@server/api/plexapi';
+import { normalizeOverlayJpegQuality } from '@server/lib/overlays/overlayOutputQuality';
+import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
@@ -88,7 +90,11 @@ export async function restoreSeasonBasePoster(
       })
     : posterPipeline.keepExif();
 
-  const posterBuffer = await posterPipeline.jpeg({ quality: 90 }).toBuffer();
+  const posterBuffer = await posterPipeline
+    .jpeg({
+      quality: normalizeOverlayJpegQuality(getSettings().overlays?.jpegQuality),
+    })
+    .toBuffer();
 
   // randomUUID (not Date.now()) so two restores of the same season can never
   // collide on the temp path and unlink each other's in-flight upload.

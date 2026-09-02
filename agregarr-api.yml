@@ -15858,7 +15858,11 @@ paths:
         '400':
           description: Invalid trigger payload
         '403':
-          description: Authentication required
+          description: Authentication required or Posterizarr integration disabled
+        '409':
+          description: A full collection or overlay sync is running; retry later
+        '429':
+          description: The bounded Posterizarr trigger queue is full; retry later
 
   /posterizarr/status:
     get:
@@ -15869,7 +15873,7 @@ paths:
         '200':
           description: Current queue and last completed result
         '403':
-          description: Authentication required
+          description: Authentication required or Posterizarr integration disabled
 
   /overlay-library-configs/{libraryId}/apply-items:
     post:
@@ -16120,6 +16124,10 @@ paths:
                     type: boolean
                     description: Whether initial setup wizard has been completed
                     example: false
+                  posterizarrIntegrationEnabled:
+                    type: boolean
+                    description: Whether authenticated Posterizarr callback endpoints accept requests
+                    example: false
                   jpegQuality:
                     type: integer
                     minimum: 1
@@ -16153,6 +16161,10 @@ paths:
                   maximum: 100
                   description: JPEG output quality for all overlaid artwork
                   example: 95
+                posterizarrIntegrationEnabled:
+                  type: boolean
+                  description: Enable authenticated Posterizarr callback processing
+                  example: false
       responses:
         '200':
           description: Settings updated successfully
@@ -16165,6 +16177,8 @@ paths:
                     type: string
                     enum: [tmdb, plex, local]
                   initialSetupComplete:
+                    type: boolean
+                  posterizarrIntegrationEnabled:
                     type: boolean
                   jpegQuality:
                     type: integer

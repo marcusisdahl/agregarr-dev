@@ -28,4 +28,21 @@ describe('collection outcome CSV', () => {
   it('returns a header-only log before any collections have completed', () => {
     expect(serializeCollectionOutcomeCsv([]).split('\r\n')).toHaveLength(2);
   });
+
+  it('neutralizes spreadsheet formulas in exported values', () => {
+    const csv = serializeCollectionOutcomeCsv([
+      {
+        configId: 'config-1',
+        name: '=HYPERLINK("https://example.invalid")',
+        sourceType: 'trakt',
+        outcome: 'success',
+        created: 0,
+        updated: 0,
+        durationMs: 1,
+        processedAt: 0,
+      },
+    ]);
+
+    expect(csv).toContain(`"'=HYPERLINK(""https://example.invalid"")"`);
+  });
 });

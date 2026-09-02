@@ -33,7 +33,8 @@ export function calculateSeasonImdbRatings(
     if (!imdbId) continue;
 
     const rating = imdbRatings.get(imdbId);
-    if (typeof rating !== 'number' || !Number.isFinite(rating)) continue;
+    if (typeof rating !== 'number' || !Number.isFinite(rating) || rating <= 0)
+      continue;
 
     const total = totals.get(episode.parentRatingKey) ?? {
       sum: 0,

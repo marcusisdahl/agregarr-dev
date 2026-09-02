@@ -18,7 +18,7 @@ export function getEpisodeRatingEligibility(
     ?.id.replace('imdb://', '');
   const rating = imdbId ? ratings?.get(imdbId) : undefined;
 
-  return typeof rating === 'number'
+  return typeof rating === 'number' && Number.isFinite(rating) && rating > 0
     ? { imdbId, rating, eligible: true }
     : { imdbId, eligible: false };
 }

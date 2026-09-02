@@ -1,9 +1,5 @@
+import { csvCell } from '@server/utils/csv';
 import type { OverlayLibraryOutcomeDetails } from './OverlayLibraryService';
-
-const csvCell = (value: string | number | undefined): string => {
-  const text = value === undefined ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
-};
 
 /** Serialize the current in-memory overlay run into a spreadsheet-safe CSV. */
 export function serializeOverlayOutcomeCsv(

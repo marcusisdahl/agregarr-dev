@@ -3,6 +3,7 @@ import {
   getOverlayTargets,
   getPrimaryOverlayTarget,
   isOverlayCompatibleWithLibrary,
+  isOverlayTargetTag,
   normalizeOverlaySyncTargets,
   setOverlayTargetTags,
   targetsArtwork,
@@ -23,6 +24,8 @@ describe('overlay artwork targets', () => {
       'episode',
     ]);
     expect(targetsArtwork(['target:episode'], 'main')).toBe(false);
+    expect(isOverlayTargetTag(' TARGET:Season ')).toBe(true);
+    expect(isOverlayTargetTag('ratings')).toBe(false);
   });
 
   it('uses a title-card preview for episode-only templates', () => {

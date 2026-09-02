@@ -4,7 +4,7 @@ export const AGREGARR_OVERLAY_MARKER = 'overlay applied by Agregarr';
 // values EXIF in its logs, but its own generated JPEGs store the identifying
 // text in a JPEG comment segment.
 const RECOGNIZED_OWNERSHIP_MARKER =
-  /created with posterizarr|created with ppm|titlecard|overlay/i;
+  /created with posterizarr|created with ppm/i;
 
 /**
  * Return the marker Posterizarr would recognize in an existing poster.

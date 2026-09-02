@@ -1,9 +1,5 @@
+import { csvCell } from '@server/utils/csv';
 import type { CollectionOutcome } from './CollectionSyncProgress';
-
-const csvCell = (value: string | number | undefined): string => {
-  const text = value === undefined ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
-};
 
 /** Serialize the current in-memory collection sync run into a CSV log. */
 export function serializeCollectionOutcomeCsv(

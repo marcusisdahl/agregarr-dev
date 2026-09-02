@@ -24,6 +24,35 @@ function isTransientPlexError(error: unknown): boolean {
   );
 }
 
+function getExplicitHttpStatus(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+
+  const candidate = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+  };
+  const value =
+    candidate.status ?? candidate.statusCode ?? candidate.response?.status;
+  const status = Number(value);
+  if (Number.isInteger(status)) return status;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const messageStatus = message.match(/\b(4\d\d)\b/);
+  return messageStatus ? Number(messageStatus[1]) : undefined;
+}
+
+function isNonRetryableClientError(error: unknown): boolean {
+  const status = getExplicitHttpStatus(error);
+  return (
+    status !== undefined &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 429
+  );
+}
+
 const wait = (delayMs: number): Promise<void> =>
   delayMs > 0
     ? new Promise((resolve) => setTimeout(resolve, delayMs))
@@ -67,7 +96,7 @@ export async function fetchPlexMetadataBatches<
       }
     }
 
-    if (keys.length > minChunkSize) {
+    if (keys.length > minChunkSize && !isNonRetryableClientError(lastError)) {
       const midpoint = Math.ceil(keys.length / 2);
       await fetchChunk(keys.slice(0, midpoint));
       await fetchChunk(keys.slice(midpoint));

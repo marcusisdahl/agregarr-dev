@@ -21,6 +21,8 @@ router.get('/', isAuthenticated(), (_req, res) => {
   return res.status(200).json({
     defaultPosterSource: settings.overlays?.defaultPosterSource || 'tmdb',
     initialSetupComplete: settings.overlays?.initialSetupComplete || false,
+    posterizarrIntegrationEnabled:
+      settings.overlays?.posterizarrIntegrationEnabled ?? false,
     watchProviderRegion: settings.overlays?.watchProviderRegion || 'US',
     jpegQuality: normalizeOverlayJpegQuality(settings.overlays?.jpegQuality),
   });
@@ -55,6 +57,16 @@ router.put('/', isAuthenticated(), async (req, res) => {
   }
   const jpegQuality = normalizeOverlayJpegQuality(requestedJpegQuality);
 
+  const requestedPosterizarrIntegrationEnabled =
+    req.body.posterizarrIntegrationEnabled ??
+    currentOverlays.posterizarrIntegrationEnabled ??
+    false;
+  if (typeof requestedPosterizarrIntegrationEnabled !== 'boolean') {
+    return res.status(400).json({
+      error: 'Posterizarr integration enabled must be a boolean',
+    });
+  }
+
   let watchProviderRegion = currentOverlays.watchProviderRegion;
   if (req.body.watchProviderRegion !== undefined) {
     const region = String(req.body.watchProviderRegion).toUpperCase();
@@ -67,6 +79,7 @@ router.put('/', isAuthenticated(), async (req, res) => {
     ...currentOverlays,
     defaultPosterSource,
     initialSetupComplete: true,
+    posterizarrIntegrationEnabled: requestedPosterizarrIntegrationEnabled,
     watchProviderRegion,
     jpegQuality,
   };
@@ -76,6 +89,8 @@ router.put('/', isAuthenticated(), async (req, res) => {
   return res.status(200).json({
     defaultPosterSource: settings.overlays.defaultPosterSource,
     initialSetupComplete: settings.overlays.initialSetupComplete,
+    posterizarrIntegrationEnabled:
+      settings.overlays.posterizarrIntegrationEnabled ?? false,
     watchProviderRegion: settings.overlays.watchProviderRegion || 'US',
     jpegQuality: normalizeOverlayJpegQuality(settings.overlays.jpegQuality),
   });

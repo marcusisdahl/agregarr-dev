@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import sharp from 'sharp';
+import { normalizeOverlayJpegQuality } from './overlayOutputQuality';
 import { getRecognizedPosterOwnershipMarker } from './posterOwnershipMetadata';
 
 interface ResetStatus {
@@ -346,7 +347,11 @@ class PosterResetJob {
         : posterPipeline.keepExif();
 
       const posterBuffer = await posterPipeline
-        .jpeg({ quality: 90 })
+        .jpeg({
+          quality: normalizeOverlayJpegQuality(
+            getSettings().overlays?.jpegQuality
+          ),
+        })
         .toBuffer();
 
       // Save to temporary file
@@ -362,24 +367,16 @@ class PosterResetJob {
         // Upload base poster back to Plex
         await plexApi.uploadPosterFromFile(item.ratingKey, tempFilePath);
 
-        // Update metadata tracking
-        const newPosterUrl = await plexApi.getCurrentPosterUrl(item.ratingKey);
-
-        if (newPosterUrl) {
-          // Clear overlay hash since we're resetting to base poster
-          await metadataService.recordOverlayApplicationWithBasePoster(
-            item.ratingKey,
-            libraryId,
-            '', // Empty hash since no overlays applied
-            newPosterUrl,
-            {
-              basePosterSource: effectivePosterSource,
-              originalPlexPosterUrl: basePosterResult.sourceUrl,
-              basePosterFilename: basePosterResult.filename,
-            },
-            item.type
-          );
-        }
+        await metadataService.recordBasePosterReset(
+          item.ratingKey,
+          libraryId,
+          {
+            basePosterSource: effectivePosterSource,
+            originalPlexPosterUrl: basePosterResult.sourceUrl,
+            basePosterFilename: basePosterResult.filename,
+          },
+          item.type
+        );
 
         // Remove "Overlay" label since we're resetting to base poster
         try {

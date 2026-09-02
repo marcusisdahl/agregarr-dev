@@ -737,6 +737,7 @@ interface JobSettings {
 export interface OverlaySettings {
   defaultPosterSource: 'tmdb' | 'plex' | 'local';
   initialSetupComplete: boolean;
+  posterizarrIntegrationEnabled?: boolean;
   watchProviderRegion?: string;
   overlayConcurrency?: number;
   jpegQuality?: number;
@@ -868,6 +869,11 @@ class Settings {
       globalExclusions: {
         movies: [],
         shows: [],
+      },
+      overlays: {
+        defaultPosterSource: 'tmdb',
+        initialSetupComplete: false,
+        posterizarrIntegrationEnabled: false,
       },
     };
     if (initialSettings) {

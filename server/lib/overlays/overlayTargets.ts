@@ -22,10 +22,14 @@ const TARGET_TAGS = new Set([
   `${TARGET_TAG_PREFIX}episode`,
 ]);
 
+export function isOverlayTargetTag(tag: string): boolean {
+  return TARGET_TAGS.has(tag.trim().toLowerCase());
+}
+
 export function getOverlayTargets(tags?: string[]): OverlayArtworkTarget[] {
   const targets = (tags ?? [])
     .map((tag) => tag.trim().toLowerCase())
-    .filter((tag) => TARGET_TAGS.has(tag))
+    .filter(isOverlayTargetTag)
     .map((tag) => tag.slice(TARGET_TAG_PREFIX.length) as OverlayArtworkTarget);
 
   // Templates created before artwork targets existed remain main-poster
@@ -95,9 +99,7 @@ export function setOverlayTargetTags(
   tags: string[] | undefined,
   targets: OverlayArtworkTarget[]
 ): string[] {
-  const ordinaryTags = (tags ?? []).filter(
-    (tag) => !TARGET_TAGS.has(tag.trim().toLowerCase())
-  );
+  const ordinaryTags = (tags ?? []).filter((tag) => !isOverlayTargetTag(tag));
   const normalizedTargets = targets.length > 0 ? targets : ['main'];
   return [
     ...ordinaryTags,

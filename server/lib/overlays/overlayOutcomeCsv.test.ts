@@ -30,4 +30,29 @@ describe('overlay outcome CSV', () => {
   it('returns a header-only log before any items have completed', () => {
     expect(serializeOverlayOutcomeCsv([]).split('\r\n')).toHaveLength(2);
   });
+
+  it('neutralizes spreadsheet formulas in exported values', () => {
+    const csv = serializeOverlayOutcomeCsv([
+      {
+        libraryId: '1',
+        libraryName: '@Movies',
+        items: [],
+      },
+      {
+        libraryId: '2',
+        libraryName: 'TV',
+        items: [
+          {
+            processedAt: 0,
+            outcome: 'success',
+            target: 'main',
+            title: '+SUM(1,1)',
+            ratingKey: '1',
+          },
+        ],
+      },
+    ]);
+
+    expect(csv).toContain(`"'+SUM(1,1)"`);
+  });
 });

@@ -5,6 +5,7 @@ vi.mock('@server/logger', () => ({
 }));
 
 import {
+  MAX_POSTERIZARR_TRIGGER_QUEUE_SIZE,
   PosterizarrTriggerJob,
   type PosterizarrTriggerInput,
 } from './posterizarrTrigger';
@@ -121,5 +122,37 @@ describe('PosterizarrTriggerJob', () => {
       ratingKey: '20',
       state: 'completed',
     });
+  });
+
+  it('rejects new items once the bounded queue is full', async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const processor = vi.fn(async (input: PosterizarrTriggerInput) => {
+      await blocked;
+      return resultFor(input);
+    });
+    const job = new PosterizarrTriggerJob(processor, 60_000, 2);
+
+    expect(job.enqueue({ ratingKey: '1' }).queued).toBe(true);
+    expect(job.busy).toBe(true);
+    expect(job.enqueue({ ratingKey: '2' }).queued).toBe(true);
+    expect(job.enqueue({ ratingKey: '3' }).queued).toBe(true);
+    expect(job.enqueue({ ratingKey: '4' })).toEqual({
+      queued: false,
+      deduplicated: false,
+      position: 0,
+      rejected: true,
+    });
+    expect(job.status.queued).toHaveLength(2);
+
+    release();
+    await waitForIdle(job);
+    expect(job.busy).toBe(false);
+  });
+
+  it('uses a production queue cap large enough for ordinary batches', () => {
+    expect(MAX_POSTERIZARR_TRIGGER_QUEUE_SIZE).toBe(100);
   });
 });

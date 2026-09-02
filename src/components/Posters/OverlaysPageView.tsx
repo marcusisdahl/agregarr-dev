@@ -167,6 +167,7 @@ const OverlaysPageView: React.FC = () => {
     defaultPosterSource: 'tmdb' | 'plex' | 'local';
     initialSetupComplete: boolean;
     jpegQuality: number;
+    posterizarrIntegrationEnabled: boolean;
   }>('/api/v1/overlay-settings');
 
   // Fetch library configs to determine which templates are active somewhere
@@ -656,6 +657,9 @@ const OverlaysPageView: React.FC = () => {
         isInitialSetup={!overlaySettings?.initialSetupComplete}
         currentPosterSource={overlaySettings?.defaultPosterSource}
         currentJpegQuality={overlaySettings?.jpegQuality}
+        currentPosterizarrIntegrationEnabled={
+          overlaySettings?.posterizarrIntegrationEnabled
+        }
       />
 
       <TestItemModal

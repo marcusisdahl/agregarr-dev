@@ -25,6 +25,8 @@ type TriggerProcessor = (
   input: PosterizarrTriggerInput
 ) => Promise<ItemQuickSyncResult>;
 
+export const MAX_POSTERIZARR_TRIGGER_QUEUE_SIZE = 100;
+
 const wait = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
@@ -127,7 +129,8 @@ export class PosterizarrTriggerJob {
 
   constructor(
     private readonly processor: TriggerProcessor = processTriggeredItem,
-    private readonly dedupeWindowMs = 60_000
+    private readonly dedupeWindowMs = 60_000,
+    private readonly maxQueueSize = MAX_POSTERIZARR_TRIGGER_QUEUE_SIZE
   ) {}
 
   private fingerprint(input: PosterizarrTriggerInput): string {
@@ -148,10 +151,15 @@ export class PosterizarrTriggerJob {
     };
   }
 
+  public get busy(): boolean {
+    return this.current !== null || this.queue.length > 0;
+  }
+
   public enqueue(input: PosterizarrTriggerInput): {
     queued: boolean;
     deduplicated: boolean;
     position: number;
+    rejected?: boolean;
   } {
     this.pruneCompleted();
     const fingerprint = this.fingerprint(input);
@@ -162,6 +170,15 @@ export class PosterizarrTriggerJob {
 
     if (duplicate) {
       return { queued: false, deduplicated: true, position: 0 };
+    }
+
+    if (this.queue.length >= this.maxQueueSize) {
+      return {
+        queued: false,
+        deduplicated: false,
+        position: 0,
+        rejected: true,
+      };
     }
 
     this.queue.push(input);

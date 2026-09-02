@@ -189,6 +189,8 @@ interface LibraryProgress {
   _promise: Promise<void>; // For mutex, not serialized
 }
 
+export const MAX_RETAINED_OVERLAY_ITEM_OUTCOMES = 5_000;
+
 /**
  * Public status shape returned by API
  */
@@ -400,6 +402,12 @@ class OverlayLibraryService {
       ...(safeMessage ? { message: safeMessage } : {}),
       ...(item.filePath ? { filePath: item.filePath } : {}),
     });
+    if (progress.itemOutcomes.length > MAX_RETAINED_OVERLAY_ITEM_OUTCOMES) {
+      progress.itemOutcomes.splice(
+        0,
+        progress.itemOutcomes.length - MAX_RETAINED_OVERLAY_ITEM_OUTCOMES
+      );
+    }
 
     if (outcome === 'error' && progress.itemErrors.length < 50) {
       progress.itemErrors.push({
@@ -3127,7 +3135,8 @@ class OverlayLibraryService {
       if (
         restoreTrackedBaseForEmptyTemplates &&
         templates.length === 0 &&
-        getUnratedEpisodeAction(Boolean(metadata)) === 'keep-clean'
+        getUnratedEpisodeAction(Boolean(metadata?.ourOverlayPosterUrl)) ===
+          'keep-clean'
       ) {
         logger.debug(
           'Episode has no usable IMDb rating and no tracked overlay; keeping clean base card',

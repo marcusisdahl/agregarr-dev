@@ -1,9 +1,33 @@
+import collectionsSync from '@server/lib/collectionsSync';
+import overlayApplication from '@server/lib/overlayApplication';
 import posterizarrTriggerJob from '@server/lib/posterizarrTrigger';
-import { Router } from 'express';
+import { getSettings } from '@server/lib/settings';
+import { Router, type Response } from 'express';
 
 const router = Router();
 
+const integrationDisabledResponse = (res: Response) =>
+  res.status(403).json({
+    error: 'Posterizarr integration is disabled in Agregarr settings',
+  });
+
 router.post('/trigger', (req, res) => {
+  if (!getSettings().overlays?.posterizarrIntegrationEnabled) {
+    return integrationDisabledResponse(res);
+  }
+
+  if (
+    collectionsSync.status.running ||
+    collectionsSync.status.pending ||
+    overlayApplication.status.running ||
+    overlayApplication.status.pending
+  ) {
+    return res.status(409).json({
+      error: 'A full collection or overlay sync is running',
+      retryable: true,
+    });
+  }
+
   const { ratingKey, title, mediaType, seasonNumber, episodeNumber } =
     req.body ?? {};
 
@@ -61,6 +85,14 @@ router.post('/trigger', (req, res) => {
     episodeNumber,
   });
 
+  if (result.rejected) {
+    return res.status(429).json({
+      error: 'Posterizarr trigger queue is full',
+      retryable: true,
+      ...result,
+    });
+  }
+
   return res.status(202).json({
     message: result.deduplicated
       ? 'Posterizarr item trigger was already queued or recently completed'
@@ -71,6 +103,10 @@ router.post('/trigger', (req, res) => {
 });
 
 router.get('/status', (_req, res) => {
+  if (!getSettings().overlays?.posterizarrIntegrationEnabled) {
+    return integrationDisabledResponse(res);
+  }
+
   return res.status(200).json(posterizarrTriggerJob.status);
 });
 

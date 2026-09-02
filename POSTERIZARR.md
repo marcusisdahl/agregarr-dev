@@ -11,10 +11,12 @@ title card without running a full-library sync.
 
 ## Configure the integration
 
-1. In Agregarr, copy the API key from **Settings > General**.
-2. In Posterizarr, open **Auto Triggers > Agregarr**.
-3. Enable the integration and enter the Agregarr base URL and API key.
-4. Use **Test connection**, then save the settings.
+1. In Agregarr, open **Overlay System > Overlay Output Settings**, enable
+   **Posterizarr Integration**, and save.
+2. Copy the Agregarr API key from **Settings > General**.
+3. In Posterizarr, open **Auto Triggers > Agregarr**.
+4. Enable the integration and enter the Agregarr base URL and API key.
+5. Use **Test connection**, then save the settings.
 
 The URL must be reachable from the Posterizarr container. If both applications
 share a Docker network, a service-name URL such as `http://agregarr:7171` can be
@@ -55,8 +57,11 @@ For each accepted callback, Agregarr:
 
 Callbacks are queued and processed serially so they cannot race collection or
 overlay jobs. Duplicate callbacks for the same root/season/episode coordinates
-are coalesced for 60 seconds. A Posterizarr job sends its callback only after a
-Plex artwork upload succeeds.
+are coalesced for 60 seconds. The queue accepts at most 100 waiting items.
+Callbacks arriving during a full collection or overlay sync, or after the queue
+fills, receive a retryable response instead of accumulating unbounded work. A
+full sync also declines to start while Posterizarr work is queued or running. A
+Posterizarr job sends its callback only after a Plex artwork upload succeeds.
 
 ## Poster selection and metadata compatibility
 
@@ -71,6 +76,12 @@ Agregarr writes an ownership marker into generated JPEG metadata. Posterizarr
 can recognize this marker and will not treat an Agregarr overlay as an
 unmanaged poster. Reset and restore operations preserve recognized Posterizarr
 ownership metadata when re-encoding artwork.
+
+The JPEG output is deliberate: the ownership marker must be stored where
+Posterizarr can read it reliably. The first overlay run after upgrading from an
+older WebP-producing build re-renders and re-uploads artwork owned by Agregarr
+because the output format and render hash changed. Later runs return to normal
+hash-based unchanged detection.
 
 ## Manual callback example
 
@@ -88,5 +99,6 @@ curl -X POST http://agregarr:7171/api/v1/posterizarr/trigger \
 ```
 
 The endpoint returns HTTP 202 when the item is queued or coalesced with recent
-work. Queue state and the last completed result are available from the status
-endpoint.
+work. It returns 409 during a full sync and 429 when the queue is full; callers
+should retry either response later. Queue state and the last completed result
+are available from the status endpoint.
