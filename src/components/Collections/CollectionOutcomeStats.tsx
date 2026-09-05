@@ -12,6 +12,7 @@ import {
 import axios from 'axios';
 import type React from 'react';
 import { useMemo, useState } from 'react';
+import { defineMessages, useIntl, type MessageDescriptor } from 'react-intl';
 import useSWR from 'swr';
 
 type CollectionOutcomeKind = 'success' | 'error' | 'skipped' | 'created';
@@ -41,42 +42,64 @@ interface CollectionOutcomeStatsProps {
   isRunning?: boolean;
 }
 
+const messages = defineMessages({
+  collectionResults: 'Collection results',
+  preparing: 'Preparing...',
+  downloadCsv: 'Download CSV log',
+  downloadFailed: 'Failed to download the sync log.',
+  synced: 'Synced',
+  errors: 'Errors',
+  skipped: 'Skipped',
+  created: 'Created',
+  syncedLower: 'synced',
+  errored: 'errored',
+  skippedLower: 'skipped',
+  createdLower: 'created',
+  loadingDetails: 'Loading collection details...',
+  loadDetailsFailed: 'Failed to load collection details.',
+  noRecordedCollections: 'No {outcome} collections recorded for this run.',
+  searchPlaceholder: 'Search {outcome} by name, source, or config ID',
+  showingEntries: 'Showing {shown} of {total} entries',
+  noMatches: 'No collections match “{searchTerm}”.',
+  itemSummary: 'Created {created} · Updated {updated} · Config {configId}',
+});
+
 const definitions: {
   outcome: CollectionOutcomeKind;
-  label: string;
-  emptyLabel: string;
+  label: MessageDescriptor;
+  emptyLabel: MessageDescriptor;
   color: string;
   activeBorder: string;
   icon: typeof CheckIcon;
 }[] = [
   {
     outcome: 'success',
-    label: 'Synced',
-    emptyLabel: 'synced',
+    label: messages.synced,
+    emptyLabel: messages.syncedLower,
     color: 'text-green-400',
     activeBorder: 'border-green-500',
     icon: CheckIcon,
   },
   {
     outcome: 'error',
-    label: 'Errors',
-    emptyLabel: 'errored',
+    label: messages.errors,
+    emptyLabel: messages.errored,
     color: 'text-red-400',
     activeBorder: 'border-red-500',
     icon: ExclamationTriangleIcon,
   },
   {
     outcome: 'skipped',
-    label: 'Skipped',
-    emptyLabel: 'skipped',
+    label: messages.skipped,
+    emptyLabel: messages.skippedLower,
     color: 'text-amber-400',
     activeBorder: 'border-amber-500',
     icon: ForwardIcon,
   },
   {
     outcome: 'created',
-    label: 'Created',
-    emptyLabel: 'created',
+    label: messages.created,
+    emptyLabel: messages.createdLower,
     color: 'text-blue-400',
     activeBorder: 'border-blue-500',
     icon: PlusIcon,
@@ -87,6 +110,7 @@ const CollectionOutcomeStats: React.FC<CollectionOutcomeStatsProps> = ({
   counts,
   isRunning = false,
 }) => {
+  const intl = useIntl();
   const [openOutcome, setOpenOutcome] = useState<CollectionOutcomeKind | null>(
     null
   );
@@ -160,7 +184,9 @@ const CollectionOutcomeStats: React.FC<CollectionOutcomeStatsProps> = ({
   return (
     <div className="mb-4">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-xs font-medium text-gray-300">Collection results</p>
+        <p className="text-xs font-medium text-gray-300">
+          {intl.formatMessage(messages.collectionResults)}
+        </p>
         <button
           type="button"
           onClick={handleDownload}
@@ -168,12 +194,14 @@ const CollectionOutcomeStats: React.FC<CollectionOutcomeStatsProps> = ({
           className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ArrowDownTrayIcon className="h-4 w-4" />
-          {isDownloading ? 'Preparing...' : 'Download CSV log'}
+          {intl.formatMessage(
+            isDownloading ? messages.preparing : messages.downloadCsv
+          )}
         </button>
       </div>
       {downloadError && (
         <p className="mb-2 text-right text-xs text-red-400">
-          Failed to download the sync log.
+          {intl.formatMessage(messages.downloadFailed)}
         </p>
       )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -197,7 +225,7 @@ const CollectionOutcomeStats: React.FC<CollectionOutcomeStatsProps> = ({
               <div className="flex min-w-0 items-center gap-2">
                 <Icon className={`h-4 w-4 shrink-0 ${definition.color}`} />
                 <span className="min-w-0 truncate text-xs text-gray-400">
-                  {definition.label}
+                  {intl.formatMessage(definition.label)}
                 </span>
                 {isOpen ? (
                   <ChevronDownIcon className="ml-auto h-3.5 w-3.5 shrink-0 text-gray-500" />
@@ -219,16 +247,17 @@ const CollectionOutcomeStats: React.FC<CollectionOutcomeStatsProps> = ({
         <div className="mt-2 rounded-md border border-stone-700 bg-stone-900 p-3">
           {isLoading ? (
             <p className="text-xs text-gray-400">
-              Loading collection details...
+              {intl.formatMessage(messages.loadingDetails)}
             </p>
           ) : error ? (
             <p className="text-xs text-red-400">
-              Failed to load collection details.
+              {intl.formatMessage(messages.loadDetailsFailed)}
             </p>
           ) : !data || data.total === 0 ? (
             <p className="text-xs text-gray-400">
-              No {selectedDefinition.emptyLabel} collections recorded for this
-              run.
+              {intl.formatMessage(messages.noRecordedCollections, {
+                outcome: intl.formatMessage(selectedDefinition.emptyLabel),
+              })}
             </p>
           ) : (
             <div className="space-y-3">
@@ -239,18 +268,28 @@ const CollectionOutcomeStats: React.FC<CollectionOutcomeStatsProps> = ({
                     type="search"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder={`Search ${selectedDefinition.label.toLowerCase()} by name, source, or config ID`}
+                    placeholder={intl.formatMessage(
+                      messages.searchPlaceholder,
+                      {
+                        outcome: intl
+                          .formatMessage(selectedDefinition.label)
+                          .toLocaleLowerCase(),
+                      }
+                    )}
                     className="w-full rounded-md border border-stone-700 bg-stone-800 py-1.5 pl-8 pr-3 text-xs text-white placeholder-gray-500 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
                   />
                 </div>
                 <p className="mt-1 text-[10px] text-gray-500">
-                  Showing {filteredOutcomes.length} of {data.total} entries
+                  {intl.formatMessage(messages.showingEntries, {
+                    shown: filteredOutcomes.length,
+                    total: data.total,
+                  })}
                 </p>
               </div>
 
               {filteredOutcomes.length === 0 ? (
                 <p className="text-xs text-gray-400">
-                  No collections match &ldquo;{searchTerm}&rdquo;.
+                  {intl.formatMessage(messages.noMatches, { searchTerm })}
                 </p>
               ) : (
                 <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
@@ -271,8 +310,11 @@ const CollectionOutcomeStats: React.FC<CollectionOutcomeStatsProps> = ({
                         </span>
                       </div>
                       <p className="mt-0.5 text-[10px] text-gray-500">
-                        Created {outcome.created} &middot; Updated{' '}
-                        {outcome.updated} &middot; Config {outcome.configId}
+                        {intl.formatMessage(messages.itemSummary, {
+                          created: outcome.created,
+                          updated: outcome.updated,
+                          configId: outcome.configId,
+                        })}
                       </p>
                       {outcome.errorMessage && (
                         <p className="mt-0.5 text-[10px] text-red-400">

@@ -2,6 +2,7 @@ import type { OverlayTargetProgressMap } from '@app/components/Posters/OverlayTa
 import OverlayTargetProgress from '@app/components/Posters/OverlayTargetProgress';
 import type { OverlayArtworkTarget } from '@server/lib/overlays/overlayTargets';
 import type React from 'react';
+import { defineMessages, useIntl } from 'react-intl';
 
 export interface OverlayLibraryProgressValue {
   libraryId: string;
@@ -22,20 +23,30 @@ interface OverlayLibraryProgressListProps {
   libraries: OverlayLibraryProgressValue[];
 }
 
-const stateLabel = (state: OverlayLibraryProgressValue['state']): string => {
-  if (state === 'running') return 'In progress';
-  if (state === 'cancelling') return 'Stopping';
-  return state.charAt(0).toUpperCase() + state.slice(1);
-};
+const messages = defineMessages({
+  libraryProgress: 'Library progress',
+  running: 'In progress',
+  cancelling: 'Stopping',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  failed: 'Failed',
+  successCount: '{count} success',
+  errorCount: '{count} errors',
+  unchangedCount: '{count} unchanged',
+  filteredCount: '{count} filtered',
+});
 
 const OverlayLibraryProgressList: React.FC<OverlayLibraryProgressListProps> = ({
   libraries,
 }) => {
+  const intl = useIntl();
   if (libraries.length === 0) return null;
 
   return (
     <div className="mb-4">
-      <p className="mb-2 text-xs font-medium text-gray-300">Library progress</p>
+      <p className="mb-2 text-xs font-medium text-gray-300">
+        {intl.formatMessage(messages.libraryProgress)}
+      </p>
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         {libraries.map((library) => {
           const percent =
@@ -74,7 +85,7 @@ const OverlayLibraryProgressList: React.FC<OverlayLibraryProgressListProps> = ({
                       isActive ? 'text-orange-300' : 'text-gray-400'
                     }`}
                   >
-                    {stateLabel(library.state)}
+                    {intl.formatMessage(messages[library.state])}
                   </p>
                   <p className="whitespace-nowrap text-xs tabular-nums text-gray-500">
                     {library.currentItem}/{library.totalItems}
@@ -98,16 +109,24 @@ const OverlayLibraryProgressList: React.FC<OverlayLibraryProgressListProps> = ({
 
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
                 <span className="text-green-400">
-                  {library.successCount} success
+                  {intl.formatMessage(messages.successCount, {
+                    count: library.successCount,
+                  })}
                 </span>
                 <span className="text-red-400">
-                  {library.errorCount} errors
+                  {intl.formatMessage(messages.errorCount, {
+                    count: library.errorCount,
+                  })}
                 </span>
                 <span className="text-amber-400">
-                  {library.skippedCount} unchanged
+                  {intl.formatMessage(messages.unchangedCount, {
+                    count: library.skippedCount,
+                  })}
                 </span>
                 <span className="text-blue-400">
-                  {library.filteredCount} filtered
+                  {intl.formatMessage(messages.filteredCount, {
+                    count: library.filteredCount,
+                  })}
                 </span>
               </div>
             </div>

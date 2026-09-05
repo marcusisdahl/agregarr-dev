@@ -7,6 +7,7 @@ describe('overlay outcome CSV', () => {
       {
         libraryId: '2',
         libraryName: 'TV Shows',
+        omittedItems: 12,
         items: [
           {
             processedAt: Date.UTC(2026, 7, 24, 9, 30),
@@ -24,6 +25,7 @@ describe('overlay outcome CSV', () => {
     expect(csv).toContain('"2026-08-24T09:30:00.000Z","TV Shows"');
     expect(csv).toContain('"Show, S01E01 - ""Pilot"""');
     expect(csv).toContain('"Plex said ""no"""');
+    expect(csv).toContain('"12"');
     expect(csv.endsWith('\r\n')).toBe(true);
   });
 
@@ -36,11 +38,13 @@ describe('overlay outcome CSV', () => {
       {
         libraryId: '1',
         libraryName: '@Movies',
+        omittedItems: 0,
         items: [],
       },
       {
         libraryId: '2',
         libraryName: 'TV',
+        omittedItems: 0,
         items: [
           {
             processedAt: 0,

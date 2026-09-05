@@ -15,6 +15,7 @@ export function serializeOverlayOutcomeCsv(
       'File Path',
       'Plex Rating Key',
       'Message',
+      'Older Entries Omitted',
     ].map(csvCell),
   ];
 
@@ -30,6 +31,7 @@ export function serializeOverlayOutcomeCsv(
           item.filePath,
           item.ratingKey,
           item.message,
+          library.omittedItems,
         ].map(csvCell)
       );
     }

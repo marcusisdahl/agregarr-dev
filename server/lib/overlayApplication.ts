@@ -261,6 +261,7 @@ class OverlayApplication {
         return;
       }
 
+      overlayLibraryService.beginOutcomeRun();
       this.totalLibraries = targets.length;
       logger.info('Found libraries with overlays configured', {
         label: 'Overlay Application',

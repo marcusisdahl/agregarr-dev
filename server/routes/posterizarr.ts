@@ -22,6 +22,7 @@ router.post('/trigger', (req, res) => {
     overlayApplication.status.running ||
     overlayApplication.status.pending
   ) {
+    res.setHeader('Retry-After', '30');
     return res.status(409).json({
       error: 'A full collection or overlay sync is running',
       retryable: true,
@@ -86,6 +87,7 @@ router.post('/trigger', (req, res) => {
   });
 
   if (result.rejected) {
+    res.setHeader('Retry-After', '15');
     return res.status(429).json({
       error: 'Posterizarr trigger queue is full',
       retryable: true,

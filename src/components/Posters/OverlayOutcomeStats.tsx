@@ -12,6 +12,7 @@ import type { OverlayArtworkTarget } from '@server/lib/overlays/overlayTargets';
 import axios from 'axios';
 import type React from 'react';
 import { useMemo, useState } from 'react';
+import { defineMessages, useIntl, type MessageDescriptor } from 'react-intl';
 import useSWR from 'swr';
 
 export type OverlayOutcomeKind = 'success' | 'error' | 'skipped' | 'filtered';
@@ -31,9 +32,12 @@ interface OverlayOutcomeItem {
 interface OverlayOutcomeResponse {
   outcome: OverlayOutcomeKind;
   total: number;
+  omittedItems: number;
+  truncated: boolean;
   libraries: {
     libraryId: string;
     libraryName: string;
+    omittedItems: number;
     items: OverlayOutcomeItem[];
   }[];
 }
@@ -44,42 +48,65 @@ interface OverlayOutcomeStatsProps {
   isRunning?: boolean;
 }
 
+const messages = defineMessages({
+  itemResults: 'Item results',
+  preparing: 'Preparing...',
+  downloadCsv: 'Download CSV log',
+  downloadFailed: 'Failed to download the sync log.',
+  success: 'Success',
+  errors: 'Errors',
+  unchanged: 'Unchanged',
+  filtered: 'Filtered',
+  successful: 'successful',
+  errored: 'errored',
+  loadingDetails: 'Loading item details...',
+  loadDetailsFailed: 'Failed to load item details.',
+  noRecordedItems: 'No {outcome} items recorded for this run.',
+  searchPlaceholder: 'Search {outcome} by title, file, Plex key, or library',
+  showingItems: 'Showing {shown} of {total} retained items',
+  omittedItems:
+    '{count, plural, one {# older item is not shown because the in-memory log limit was reached.} other {# older items are not shown because the in-memory log limit was reached.}}',
+  noMatches: 'No items match “{searchTerm}”.',
+  poster: 'poster',
+  plexKey: 'Plex key: {ratingKey}',
+});
+
 const definitions: {
   outcome: OverlayOutcomeKind;
-  label: string;
-  emptyLabel: string;
+  label: MessageDescriptor;
+  emptyLabel: MessageDescriptor;
   color: string;
   activeBorder: string;
   icon: typeof CheckIcon;
 }[] = [
   {
     outcome: 'success',
-    label: 'Success',
-    emptyLabel: 'successful',
+    label: messages.success,
+    emptyLabel: messages.successful,
     color: 'text-green-400',
     activeBorder: 'border-green-500',
     icon: CheckIcon,
   },
   {
     outcome: 'error',
-    label: 'Errors',
-    emptyLabel: 'errored',
+    label: messages.errors,
+    emptyLabel: messages.errored,
     color: 'text-red-400',
     activeBorder: 'border-red-500',
     icon: ExclamationTriangleIcon,
   },
   {
     outcome: 'skipped',
-    label: 'Unchanged',
-    emptyLabel: 'unchanged',
+    label: messages.unchanged,
+    emptyLabel: messages.unchanged,
     color: 'text-amber-400',
     activeBorder: 'border-amber-500',
     icon: ForwardIcon,
   },
   {
     outcome: 'filtered',
-    label: 'Filtered',
-    emptyLabel: 'filtered',
+    label: messages.filtered,
+    emptyLabel: messages.filtered,
     color: 'text-blue-400',
     activeBorder: 'border-blue-500',
     icon: FunnelIcon,
@@ -91,6 +118,7 @@ const OverlayOutcomeStats: React.FC<OverlayOutcomeStatsProps> = ({
   libraryIds,
   isRunning = false,
 }) => {
+  const intl = useIntl();
   const [openOutcome, setOpenOutcome] = useState<OverlayOutcomeKind | null>(
     null
   );
@@ -178,7 +206,9 @@ const OverlayOutcomeStats: React.FC<OverlayOutcomeStatsProps> = ({
   return (
     <div className="mb-4">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-xs font-medium text-gray-300">Item results</p>
+        <p className="text-xs font-medium text-gray-300">
+          {intl.formatMessage(messages.itemResults)}
+        </p>
         <button
           type="button"
           onClick={handleDownload}
@@ -186,12 +216,14 @@ const OverlayOutcomeStats: React.FC<OverlayOutcomeStatsProps> = ({
           className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ArrowDownTrayIcon className="h-4 w-4" />
-          {isDownloading ? 'Preparing...' : 'Download CSV log'}
+          {intl.formatMessage(
+            isDownloading ? messages.preparing : messages.downloadCsv
+          )}
         </button>
       </div>
       {downloadError && (
         <p className="mb-2 text-right text-xs text-red-400">
-          Failed to download the sync log.
+          {intl.formatMessage(messages.downloadFailed)}
         </p>
       )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -215,7 +247,7 @@ const OverlayOutcomeStats: React.FC<OverlayOutcomeStatsProps> = ({
               <div className="flex items-center gap-2">
                 <Icon className={`h-4 w-4 ${definition.color}`} />
                 <span className="text-xs text-gray-400">
-                  {definition.label}
+                  {intl.formatMessage(definition.label)}
                 </span>
                 {isOpen ? (
                   <ChevronDownIcon className="ml-auto h-3.5 w-3.5 text-gray-500" />
@@ -234,12 +266,18 @@ const OverlayOutcomeStats: React.FC<OverlayOutcomeStatsProps> = ({
       {openOutcome && selectedDefinition && (
         <div className="mt-2 rounded-md border border-stone-700 bg-stone-900 p-3">
           {isLoading ? (
-            <p className="text-xs text-gray-400">Loading item details...</p>
+            <p className="text-xs text-gray-400">
+              {intl.formatMessage(messages.loadingDetails)}
+            </p>
           ) : error ? (
-            <p className="text-xs text-red-400">Failed to load item details.</p>
+            <p className="text-xs text-red-400">
+              {intl.formatMessage(messages.loadDetailsFailed)}
+            </p>
           ) : !data || data.total === 0 ? (
             <p className="text-xs text-gray-400">
-              No {selectedDefinition.emptyLabel} items recorded for this run.
+              {intl.formatMessage(messages.noRecordedItems, {
+                outcome: intl.formatMessage(selectedDefinition.emptyLabel),
+              })}
             </p>
           ) : (
             <div className="space-y-3">
@@ -250,18 +288,35 @@ const OverlayOutcomeStats: React.FC<OverlayOutcomeStatsProps> = ({
                     type="search"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder={`Search ${selectedDefinition.label.toLowerCase()} by title, file, Plex key, or library`}
+                    placeholder={intl.formatMessage(
+                      messages.searchPlaceholder,
+                      {
+                        outcome: intl
+                          .formatMessage(selectedDefinition.label)
+                          .toLocaleLowerCase(),
+                      }
+                    )}
                     className="w-full rounded-md border border-stone-700 bg-stone-800 py-1.5 pl-8 pr-3 text-xs text-white placeholder-gray-500 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
                   />
                 </div>
                 <p className="mt-1 text-[10px] text-gray-500">
-                  Showing {filteredTotal} of {data.total} items
+                  {intl.formatMessage(messages.showingItems, {
+                    shown: filteredTotal,
+                    total: data.total,
+                  })}
                 </p>
+                {data.truncated && (
+                  <p className="mt-1 text-[10px] text-amber-400">
+                    {intl.formatMessage(messages.omittedItems, {
+                      count: data.omittedItems,
+                    })}
+                  </p>
+                )}
               </div>
 
               {filteredTotal === 0 ? (
                 <p className="text-xs text-gray-400">
-                  No items match &ldquo;{searchTerm}&rdquo;.
+                  {intl.formatMessage(messages.noMatches, { searchTerm })}
                 </p>
               ) : (
                 <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
@@ -282,12 +337,15 @@ const OverlayOutcomeStats: React.FC<OverlayOutcomeStatsProps> = ({
                               </span>
                               <span className="ml-auto shrink-0 rounded bg-stone-700 px-1.5 py-0.5 text-[10px] uppercase text-gray-400">
                                 {item.target === 'main'
-                                  ? 'poster'
+                                  ? intl.formatMessage(messages.poster)
                                   : item.target}
                               </span>
                             </div>
                             <p className="mt-0.5 break-all text-[10px] text-gray-500">
-                              {item.filePath || `Plex key: ${item.ratingKey}`}
+                              {item.filePath ||
+                                intl.formatMessage(messages.plexKey, {
+                                  ratingKey: item.ratingKey,
+                                })}
                             </p>
                             {item.message && (
                               <p className="mt-0.5 text-[10px] text-gray-500">

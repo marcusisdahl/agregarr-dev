@@ -7,11 +7,13 @@ import type { SonarrSeries } from '@server/api/servarr/sonarr';
 import TheMovieDb from '@server/api/themoviedb';
 import { getRepository } from '@server/datasource';
 import { OverlayLibraryConfig } from '@server/entity/OverlayLibraryConfig';
+import type { IconMapping } from '@server/entity/OverlayTemplate';
 import { OverlayTemplate } from '@server/entity/OverlayTemplate';
 import cacheManager from '@server/lib/cache';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { scrubSecrets } from '@server/utils/logRedaction';
+import { mapWithConcurrency } from '@server/utils/mapWithConcurrency';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -129,6 +131,7 @@ export interface OverlayItemOutcomeDetail {
 export interface OverlayLibraryOutcomeDetails {
   libraryId: string;
   libraryName: string;
+  omittedItems: number;
   items: OverlayItemOutcomeDetail[];
 }
 
@@ -183,6 +186,7 @@ interface LibraryProgress {
   // Per-item error details for persistence (capped at 50 per library)
   itemErrors: { title: string; ratingKey: string; error: string }[];
   itemOutcomes: OverlayItemOutcomeDetail[];
+  omittedOutcomeCounts: Record<OverlayItemOutcome, number>;
 
   // ETA calculation (private, not serialized)
   _recentItemTimes: number[]; // Rolling window of last 20 item timestamps
@@ -334,6 +338,23 @@ class OverlayLibraryService {
     string,
     OverlayItemOutcomeDetail[]
   >();
+  private lastCompletedOmittedOutcomeCounts = new Map<
+    string,
+    Record<OverlayItemOutcome, number>
+  >();
+
+  /** Start a user-visible sync result set without disturbing active jobs. */
+  public beginOutcomeRun(): void {
+    this.lastCompletedLibraries.clear();
+    this.lastCompletedItemOutcomes.clear();
+    this.lastCompletedOmittedOutcomeCounts.clear();
+
+    for (const [libraryId, progress] of this.runningLibraries) {
+      if (progress.state !== 'running' && progress.state !== 'cancelling') {
+        this.runningLibraries.delete(libraryId);
+      }
+    }
+  }
 
   /**
    * Request cancellation of a library overlay job
@@ -403,10 +424,13 @@ class OverlayLibraryService {
       ...(item.filePath ? { filePath: item.filePath } : {}),
     });
     if (progress.itemOutcomes.length > MAX_RETAINED_OVERLAY_ITEM_OUTCOMES) {
-      progress.itemOutcomes.splice(
+      const removed = progress.itemOutcomes.splice(
         0,
         progress.itemOutcomes.length - MAX_RETAINED_OVERLAY_ITEM_OUTCOMES
       );
+      for (const item of removed) {
+        progress.omittedOutcomeCounts[item.outcome]++;
+      }
     }
 
     if (outcome === 'error' && progress.itemErrors.length < 50) {
@@ -473,6 +497,9 @@ class OverlayLibraryService {
         progress.itemErrors.length > 0 ? [...progress.itemErrors] : undefined,
     });
     this.lastCompletedItemOutcomes.set(libraryId, [...progress.itemOutcomes]);
+    this.lastCompletedOmittedOutcomeCounts.set(libraryId, {
+      ...progress.omittedOutcomeCounts,
+    });
   }
 
   public getLastCompletedLibraries(): (LibraryStatus & {
@@ -500,11 +527,23 @@ class OverlayLibraryService {
       const items = running
         ? running.itemOutcomes
         : this.lastCompletedItemOutcomes.get(libraryId) ?? [];
+      const omittedOutcomeCounts = running
+        ? running.omittedOutcomeCounts
+        : this.lastCompletedOmittedOutcomeCounts.get(libraryId);
+      const omittedItems = outcome
+        ? omittedOutcomeCounts?.[outcome] ?? 0
+        : omittedOutcomeCounts
+        ? Object.values(omittedOutcomeCounts).reduce(
+            (sum, count) => sum + count,
+            0
+          )
+        : 0;
 
       return {
         libraryId,
         libraryName:
           running?.libraryName ?? completed?.libraryName ?? libraryId,
+        omittedItems,
         items: items
           .filter((item) => !outcome || item.outcome === outcome)
           .map((item) => ({ ...item })),
@@ -1031,39 +1070,37 @@ class OverlayLibraryService {
     }
 
     const tmdbClient = new TheMovieDb();
-    await Promise.all(
-      [...requests.values()].map(async (request) => {
-        try {
-          const season = await tmdbClient.getTvSeason({
-            tvId: request.tvId,
-            seasonNumber: request.seasonNumber,
-          });
+    await mapWithConcurrency([...requests.values()], 10, async (request) => {
+      try {
+        const season = await tmdbClient.getTvSeason({
+          tvId: request.tvId,
+          seasonNumber: request.seasonNumber,
+        });
 
-          for (const member of request.items) {
-            contexts.set(
-              member.item.ratingKey,
-              member.item.target === 'season'
-                ? getTmdbSeasonRatingContext(season)
-                : getTmdbEpisodeRatingContext(
-                    season,
-                    member.episodeNumber as number
-                  )
-            );
-          }
-        } catch (error) {
-          for (const member of request.items) {
-            failedRatingKeys.add(member.item.ratingKey);
-          }
-          logger.warn('Failed to fetch TMDB child ratings', {
-            label: 'OverlayLibrary',
-            tvId: request.tvId,
-            seasonNumber: request.seasonNumber,
-            affectedItems: request.items.length,
-            error: error instanceof Error ? error.message : String(error),
-          });
+        for (const member of request.items) {
+          contexts.set(
+            member.item.ratingKey,
+            member.item.target === 'season'
+              ? getTmdbSeasonRatingContext(season)
+              : getTmdbEpisodeRatingContext(
+                  season,
+                  member.episodeNumber as number
+                )
+          );
         }
-      })
-    );
+      } catch (error) {
+        for (const member of request.items) {
+          failedRatingKeys.add(member.item.ratingKey);
+        }
+        logger.warn('Failed to fetch TMDB child ratings', {
+          label: 'OverlayLibrary',
+          tvId: request.tvId,
+          seasonNumber: request.seasonNumber,
+          affectedItems: request.items.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
 
     logger.info('Resolved TMDB child ratings', {
       label: 'OverlayLibrary',
@@ -1615,6 +1652,12 @@ class OverlayLibraryService {
       skippedCount: 0,
       itemErrors: [],
       itemOutcomes: [],
+      omittedOutcomeCounts: {
+        success: 0,
+        error: 0,
+        skipped: 0,
+        filtered: 0,
+      },
       _recentItemTimes: [],
       _promise: deferredPromise,
     });
@@ -3397,8 +3440,11 @@ class OverlayLibraryService {
       // Extract which context fields are actually used by MATCHING templates
       // CRITICAL: Hash uses matching template IDs + variable field values + condition field values
       // Template IDs capture which templates match, field values capture all data affecting rendering
-      const { calculateOverlayInputHash, extractUsedContextFields } =
-        await import('@server/utils/metadataHashing');
+      const {
+        calculateOverlayInputHash,
+        extractMappedIconFields,
+        extractUsedContextFields,
+      } = await import('@server/utils/metadataHashing');
 
       const templateDataArray = matchingTemplates.map((t) =>
         t.getTemplateData()
@@ -3411,6 +3457,18 @@ class OverlayLibraryService {
         applicationConditions
       );
 
+      const mappedIconFields = extractMappedIconFields(templateDataArray);
+      let mappedIconMappings: Record<string, IconMapping[]> | undefined;
+      if (mappedIconFields.size > 0) {
+        const { getMergedMappings } = await import(
+          '@server/lib/overlays/UserMappingsService'
+        );
+        mappedIconMappings = {};
+        for (const field of mappedIconFields) {
+          mappedIconMappings[field] = getMergedMappings(field);
+        }
+      }
+
       const overlayInputHash = calculateOverlayInputHash({
         templateIds: matchingTemplates.map((t) => t.id).sort(),
         templateData: templateDataArray,
@@ -3421,6 +3479,7 @@ class OverlayLibraryService {
           jpegQuality,
           chromaSubsampling: '4:4:4',
         },
+        mappedIconMappings,
       });
 
       // Debug logging for hash comparison
@@ -3449,6 +3508,10 @@ class OverlayLibraryService {
         },
       });
 
+      // Default to the safe upload path if the ownership check fails. This
+      // prevents a transient Plex error from leaving an old overlay in place.
+      let currentPosterIsOurs = true;
+
       // OPTIMIZATION: Check if overlay inputs changed BEFORE downloading poster
       // This prevents expensive poster downloads when nothing has changed
       try {
@@ -3468,6 +3531,7 @@ class OverlayLibraryService {
           metadata?.ourOverlayPosterUrl,
           currentPosterUrl
         );
+        currentPosterIsOurs = !plexPosterMissing;
 
         // Debug logging for poster URL comparison
         logger.debug('Poster URL comparison', {
@@ -3614,10 +3678,20 @@ class OverlayLibraryService {
             context
           );
 
-        if (templateOverlays) {
+        if (templateOverlays?.length) {
           allOverlays.push(...templateOverlays);
           templatesApplied++;
         }
+      }
+
+      if (allOverlays.length === 0 && !currentPosterIsOurs) {
+        logger.info('No overlay elements rendered - skipping upload', {
+          label: 'OverlayLibrary',
+          itemTitle: item.title,
+          ratingKey: item.ratingKey,
+          matchingTemplates: matchingTemplates.length,
+        });
+        return { skipped: true };
       }
 
       // Single composite + JPEG encode for all templates

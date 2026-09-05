@@ -316,6 +316,7 @@ router.post('/:libraryId/apply', async (req, res, next) => {
       userId: req.user?.id,
     });
 
+    overlayLibraryService.beginOutcomeRun();
     // Start async overlay application
     overlayLibraryService
       .applyOverlaysToLibrary(libraryId)
@@ -410,6 +411,7 @@ router.post('/:libraryId/apply-items', async (req, res, next) => {
       userId: req.user?.id,
     });
 
+    overlayLibraryService.beginOutcomeRun();
     // Start async overlay application for single item
     overlayLibraryService
       .applyOverlaysToCollectionItems([ratingKey], libraryId)
@@ -443,6 +445,10 @@ router.get('/status/outcomes/export', (req, res) => {
     undefined,
     libraryIds
   );
+  const omittedItems = libraries.reduce(
+    (sum, library) => sum + library.omittedItems,
+    0
+  );
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -450,6 +456,7 @@ router.get('/status/outcomes/export', (req, res) => {
     'Content-Disposition',
     `attachment; filename="agregarr-overlay-sync-${timestamp}.csv"`
   );
+  res.setHeader('X-Agregarr-Omitted-Items', String(omittedItems));
   return res.status(200).send(`\uFEFF${serializeOverlayOutcomeCsv(libraries)}`);
 });
 
@@ -477,10 +484,16 @@ router.get('/status/outcomes', (req, res) => {
     outcome as OverlayItemOutcome,
     libraryIds
   );
+  const omittedItems = libraries.reduce(
+    (sum, library) => sum + library.omittedItems,
+    0
+  );
 
   return res.status(200).json({
     outcome,
     total: libraries.reduce((sum, library) => sum + library.items.length, 0),
+    omittedItems,
+    truncated: omittedItems > 0,
     libraries,
   });
 });

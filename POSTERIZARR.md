@@ -99,6 +99,7 @@ curl -X POST http://agregarr:7171/api/v1/posterizarr/trigger \
 ```
 
 The endpoint returns HTTP 202 when the item is queued or coalesced with recent
-work. It returns 409 during a full sync and 429 when the queue is full; callers
-should retry either response later. Queue state and the last completed result
+work. It returns 409 during a full sync and 429 when the queue is full; both
+responses include a `Retry-After` header that callers should honor. Queue state
+and the last completed result
 are available from the status endpoint.

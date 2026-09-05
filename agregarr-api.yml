@@ -122,12 +122,16 @@ components:
           type: string
     OverlayLibraryOutcomeDetails:
       type: object
-      required: [libraryId, libraryName, items]
+      required: [libraryId, libraryName, omittedItems, items]
       properties:
         libraryId:
           type: string
         libraryName:
           type: string
+        omittedItems:
+          type: integer
+          minimum: 0
+          description: Number of older item outcomes omitted by the in-memory retention limit.
         items:
           type: array
           items:
@@ -15861,8 +15865,18 @@ paths:
           description: Authentication required or Posterizarr integration disabled
         '409':
           description: A full collection or overlay sync is running; retry later
+          headers:
+            Retry-After:
+              description: Suggested delay in seconds before retrying.
+              schema:
+                type: integer
         '429':
           description: The bounded Posterizarr trigger queue is full; retry later
+          headers:
+            Retry-After:
+              description: Suggested delay in seconds before retrying.
+              schema:
+                type: integer
 
   /posterizarr/status:
     get:
@@ -16061,13 +16075,21 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [outcome, total, libraries]
+                required: [outcome, total, omittedItems, truncated, libraries]
                 properties:
                   outcome:
                     type: string
                     enum: [success, error, skipped, filtered]
                   total:
                     type: integer
+                    description: Number of retained outcomes returned.
+                  omittedItems:
+                    type: integer
+                    minimum: 0
+                    description: Number of older matching outcomes omitted by the retention limit.
+                  truncated:
+                    type: boolean
+                    description: True when one or more older matching outcomes were omitted.
                   libraries:
                     type: array
                     items:
@@ -16080,7 +16102,7 @@ paths:
   /overlay-library-configs/status/outcomes/export:
     get:
       summary: Download the overlay sync item log
-      description: Downloads a CSV snapshot of all item outcomes from the current or last completed overlay sync.
+      description: Downloads a CSV snapshot of retained item outcomes from the current or last completed overlay sync. Each row reports how many older entries were omitted for its library.
       tags:
         - overlays
       parameters:
